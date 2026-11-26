@@ -16,18 +16,13 @@ class SoundAndNotificationController {
     if (typeof window !== 'undefined') {
       const onGesture = () => {
         this.userInteracted = true;
-        const ctx = this.getExistingContext();
-        if (ctx && ctx.state === 'suspended') {
-          ctx.resume().catch(() => {});
+        if (this.audioCtx && this.audioCtx.state === 'suspended') {
+          this.audioCtx.resume().catch(() => {});
         }
       };
       window.addEventListener('pointerdown', onGesture, { passive: true });
       window.addEventListener('keydown', onGesture, { passive: true });
     }
-  }
-
-  private getExistingContext(): AudioContext | null {
-    return this.audioCtx;
   }
 
   private ensureContextAfterGesture(): AudioContext | null {
@@ -92,37 +87,37 @@ class SoundAndNotificationController {
         osc.stop(now + n.start + n.duration + 0.02);
       }
     } catch {
-      // Ignorado si el navegador bloquea audio
+      // Ignorado si el navegador aún bloquea el audio
     }
   }
 
   private showInAppToast(alert: IncomingMessageAlert): void {
     if (typeof document === 'undefined') return;
-    let container = document.getElementById('wa-toast-container');
+    let container = document.getElementById('pin-top-toast-container');
     if (!container) {
       container = document.createElement('div');
-      container.id = 'wa-toast-container';
-      container.className = 'wa-toast-container';
+      container.id = 'pin-top-toast-container';
+      container.className = 'pin-top-toast-container';
       document.body.appendChild(container);
     }
 
     const toast = document.createElement('div');
-    toast.className = 'wa-toast';
+    toast.className = 'pin-top-toast';
     toast.setAttribute('role', 'status');
 
     const title = document.createElement('div');
-    title.className = 'wa-toast-title';
+    title.className = 'pin-top-toast-title';
     title.textContent = alert.senderLabel;
 
     const body = document.createElement('div');
-    body.className = 'wa-toast-body';
+    body.className = 'pin-top-toast-body';
     body.textContent = alert.previewText;
 
     toast.append(title, body);
     container.appendChild(toast);
 
     window.setTimeout(() => {
-      toast.classList.add('wa-toast-hide');
+      toast.classList.add('pin-top-toast-hide');
       window.setTimeout(() => toast.remove(), 250);
     }, 4000);
   }
@@ -147,7 +142,7 @@ class SoundAndNotificationController {
           notif.close();
         };
       } catch {
-        // Ignorado si no está disponible
+        // Ignorado si el entorno no soporta notificaciones nativas
       }
     }
 
@@ -172,7 +167,7 @@ class SoundAndNotificationController {
       for (const mut of mutations) {
         mut.addedNodes.forEach((node) => {
           if (!(node instanceof HTMLElement)) return;
-          if (node.closest('#wa-toast-container')) return;
+          if (node.closest('#pin-top-toast-container')) return;
 
           const candidates = node.matches('.message, .msg-item, .chat-message, [data-message-id]')
             ? [node]
@@ -211,7 +206,18 @@ class SoundAndNotificationController {
 
 export const waAlerts = new SoundAndNotificationController();
 
-export function applyWhatsAppLayoutClasses(): void {
+export function promoteActionBarsToTop(): void {
   if (typeof document === 'undefined') return;
-  document.body.classList.add('wa-theme-shell');
+  document.body.classList.add('pin-wa-topbars');
+
+  const toolbars = document.querySelectorAll<HTMLElement>(
+    '.toolbar, .top-actions, .actions-bar, .header-actions, .chat-actions, nav.actions'
+  );
+  toolbars.forEach((bar) => {
+    bar.classList.add('pin-topbar-strip');
+  });
+}
+
+export function applyWhatsAppLayoutClasses(): void {
+  promoteActionBarsToTop();
 }

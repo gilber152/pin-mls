@@ -1011,23 +1011,113 @@ body.wa-theme-shell {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* === PIN_BLUE_WHITE_WA_START === */
+:root {
+  --pin-bw-surface: #f0f6fc;
+  --pin-bw-header: #e6f0fa;
+  --pin-bw-card: #ffffff;
+  --pin-bw-canvas: #f4f8fc;
+  --pin-bw-bubble-in: #ffffff;
+  --pin-bw-bubble-out: #d3e3fd;
+  --pin-bw-primary: #0b57d0;
+  --pin-bw-primary-hover: #0842a0;
+  --pin-bw-ink: #0f172a;
+  --pin-bw-ink-out: #041e49;
+  --pin-bw-muted: #475569;
+  --pin-bw-line: #d6e4f0;
+}
 
+body.pin-wa-topbars {
+  background: var(--pin-bw-surface);
+  color: var(--pin-bw-ink);
+  font-family: "Segoe UI", system-ui, -apple-system, Roboto, sans-serif;
+}
 
+/* Barra superior de funciones en blanco y azul suave */
+.pin-topbar-strip,
+body.pin-wa-topbars header,
+body.pin-wa-topbars .topbar,
+body.pin-wa-topbars .chat-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  background: linear-gradient(180deg, var(--pin-bw-card) 0%, var(--pin-bw-header) 100%);
+  color: var(--pin-bw-ink);
+  border-bottom: 1px solid var(--pin-bw-line);
+  padding: 8px 14px;
+}
 
-/* === WA_CLEAN_OVERLAY_START === */
+/* Botones principales en azul con blanco */
+body.pin-wa-topbars button.primary,
+body.pin-wa-topbars .btn-primary,
+body.pin-wa-topbars [type="submit"] {
+  background: var(--pin-bw-primary);
+  color: #ffffff;
+  border-color: var(--pin-bw-primary);
+}
+
+body.pin-wa-topbars button.primary:hover,
+body.pin-wa-topbars .btn-primary:hover,
+body.pin-wa-topbars [type="submit"]:hover {
+  background: var(--pin-bw-primary-hover);
+  border-color: var(--pin-bw-primary-hover);
+}
+
+/* Área de conversación y burbujas azul + blanco */
+body.pin-wa-topbars .messages,
+body.pin-wa-topbars .message-list,
+body.pin-wa-topbars .chat-messages {
+  background-color: var(--pin-bw-canvas);
+  background-image: radial-gradient(rgba(11, 87, 208, 0.055) 1px, transparent 0);
+  background-size: 20px 20px;
+}
+
+body.pin-wa-topbars .message,
+body.pin-wa-topbars .msg-item,
+body.pin-wa-topbars .chat-message {
+  background: var(--pin-bw-bubble-in);
+  color: var(--pin-bw-ink);
+  border: 1px solid var(--pin-bw-line);
+  border-radius: 10px;
+  border-top-left-radius: 2px;
+  box-shadow: 0 1px 2px rgba(11, 87, 208, 0.06);
+}
+
+body.pin-wa-topbars .message.outgoing,
+body.pin-wa-topbars .msg-item.outgoing,
+body.pin-wa-topbars .chat-message.outgoing,
+body.pin-wa-topbars .message.self,
+body.pin-wa-topbars .message.me,
+body.pin-wa-topbars .message.sent,
+body.pin-wa-topbars [data-outgoing="true"] {
+  background: var(--pin-bw-bubble-out);
+  color: var(--pin-bw-ink-out);
+  border: 1px solid #b8d2fb;
+  border-radius: 10px;
+  border-top-right-radius: 2px;
+}
+
+/* Modales seguros sin desborde ni bloqueo */
 dialog,
 .modal,
 [role="dialog"] {
-  max-width: min(94vw, 540px);
+  background: var(--pin-bw-card);
+  color: var(--pin-bw-ink);
+  border: 1px solid var(--pin-bw-line);
+  max-width: min(94vw, 560px);
   max-height: 88vh;
   overflow-y: auto;
+  z-index: 9500;
   box-sizing: border-box;
 }
 
-.wa-toast-container {
+/* Notificación emergente azul con blanco */
+.pin-top-toast-container {
   position: fixed;
-  top: 16px;
-  right: 16px;
+  top: 14px;
+  right: 14px;
   z-index: 10000;
   display: flex;
   flex-direction: column;
@@ -1036,32 +1126,33 @@ dialog,
   pointer-events: none;
 }
 
-.wa-toast {
-  background: #ffffff;
-  border-left: 4px solid #00a884;
+.pin-top-toast {
+  background: var(--pin-bw-card);
+  border: 1px solid var(--pin-bw-line);
+  border-left: 4px solid var(--pin-bw-primary);
   border-radius: 10px;
   padding: 10px 14px;
-  box-shadow: 0 6px 20px rgba(17, 27, 33, 0.18);
+  box-shadow: 0 6px 20px rgba(11, 87, 208, 0.14);
   transition: opacity 0.22s ease, transform 0.22s ease;
 }
 
-.wa-toast-hide {
+.pin-top-toast-hide {
   opacity: 0;
   transform: translateY(-6px);
 }
 
-.wa-toast-title {
+.pin-top-toast-title {
   font-weight: 700;
   font-size: 0.9rem;
-  color: #111b21;
+  color: var(--pin-bw-ink);
   margin-bottom: 2px;
 }
 
-.wa-toast-body {
+.pin-top-toast-body {
   font-size: 0.84rem;
-  color: #54656f;
+  color: var(--pin-bw-muted);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-/* === WA_CLEAN_OVERLAY_END === */
+/* === PIN_BLUE_WHITE_WA_END === */
