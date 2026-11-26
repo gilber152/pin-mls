@@ -1011,246 +1011,245 @@ body.wa-theme-shell {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-/* === PIN_HIGH_CONTRAST_BW_START === */
+/* === PIN_REAL_DOM_BW_START === */
 :root {
-  --hc-bg-page: #e8f0f8;
-  --hc-bg-surface: #ffffff;
-  --hc-bg-soft: #f1f6fc;
-  --hc-navy: #0f294a;
-  --hc-blue: #0b57d0;
-  --hc-blue-hover: #0842a0;
-  --hc-bubble-in: #ffffff;
-  --hc-bubble-out: #dbeafe;
-  --hc-text-main: #0f172a;
-  --hc-text-secondary: #334155;
-  --hc-text-on-dark: #ffffff;
-  --hc-border: #cbd5e1;
+  --pin-bg: #e9f1f8;
+  --pin-white: #ffffff;
+  --pin-soft: #f2f7fc;
+  --pin-navy: #0f294a;
+  --pin-blue: #0b57d0;
+  --pin-blue-dark: #0842a0;
+  --pin-bubble-mine: #dbeafe;
+  --pin-bubble-theirs: #ffffff;
+  --pin-ink: #0f172a;
+  --pin-ink-sub: #334155;
+  --pin-border: #cbd5e1;
 }
 
+body,
+body.wa-theme-shell,
 body.pin-wa-topbars {
-  background: var(--hc-bg-page);
-  color: var(--hc-text-main);
+  background: var(--pin-bg) !important;
+  color: var(--pin-ink) !important;
   font-family: "Segoe UI", system-ui, -apple-system, Roboto, sans-serif;
 }
 
-/* Barra superior de funciones: azul marino con letras blancas bien legibles */
-.pin-topbar-strip,
-body.pin-wa-topbars header,
-body.pin-wa-topbars .topbar,
-body.pin-wa-topbars .chat-header {
-  display: flex;
-  flex-wrap: wrap;
+/* Respetar hidden en vistas y estados */
+[hidden] {
+  display: none !important;
+}
+
+/* Cabecera superior / barras de acciones arriba en azul marino + blanco */
+#view-chat > header,
+#view-chat .topbar,
+#view-chat .app-header,
+.pin-topbar-strip {
+  background: var(--pin-navy) !important;
+  color: #ffffff !important;
+  border-bottom: 2px solid var(--pin-blue) !important;
+}
+
+#view-chat > header *,
+#view-chat .topbar *,
+#view-chat .app-header *,
+.pin-topbar-strip * {
+  color: #ffffff !important;
+}
+
+#view-chat > header input,
+#view-chat .topbar input,
+.pin-topbar-strip input {
+  background: #ffffff !important;
+  color: var(--pin-ink) !important;
+}
+
+/* Asegurar visibilidad y contraste de lista de chats e invitaciones */
+#list-chats,
+#list-invites,
+#devices-list {
+  display: flex !important;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 120px;
+  background: var(--pin-white) !important;
+  color: var(--pin-ink) !important;
+}
+
+.list-card {
+  background: var(--pin-white) !important;
+  color: var(--pin-ink) !important;
+  border: 1px solid var(--pin-border) !important;
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+
+.list-card * {
+  color: var(--pin-ink) !important;
+}
+
+.list-card .muted-small,
+.muted-small {
+  color: var(--pin-ink-sub) !important;
+}
+
+.list-card.clickable:hover {
+  background: #eff6ff !important;
+  border-color: #93c5fd !important;
+}
+
+.list-card.clickable.active {
+  background: #dbeafe !important;
+  border-color: var(--pin-blue) !important;
+  border-left: 4px solid var(--pin-blue) !important;
+}
+
+/* Panel principal de chat y mensajes */
+#chat-empty,
+#chat-active,
+#messages-list {
+  color: var(--pin-ink) !important;
+}
+
+#chat-empty:not([hidden]) {
+  display: flex !important;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px 12px;
-  background: var(--hc-navy);
-  color: var(--hc-text-on-dark);
-  border-bottom: 2px solid var(--hc-blue);
-  padding: 10px 16px;
+  justify-content: center;
+  min-height: 240px;
+  background: var(--pin-soft) !important;
+  color: var(--pin-ink-sub) !important;
 }
 
-.pin-topbar-strip *,
-body.pin-wa-topbars header *,
-body.pin-wa-topbars .topbar *,
-body.pin-wa-topbars .chat-header * {
-  color: var(--hc-text-on-dark);
+#chat-active:not([hidden]) {
+  display: flex !important;
+  flex-direction: column;
+  min-height: 320px;
+  background: var(--pin-soft) !important;
 }
 
-.pin-topbar-strip input,
-body.pin-wa-topbars header input,
-body.pin-wa-topbars .topbar input {
-  background: #ffffff;
-  color: var(--hc-text-main);
-  border: 1px solid #93c5fd;
-}
-
-.pin-topbar-strip input::placeholder,
-body.pin-wa-topbars header input::placeholder {
-  color: #475569;
-}
-
-/* Paneles laterales, tarjetas e ítems de conversación: fondo blanco y texto oscuro nítido */
-body.pin-wa-topbars aside,
-body.pin-wa-topbars .sidebar,
-body.pin-wa-topbars .panel,
-body.pin-wa-topbars .card,
-body.pin-wa-topbars .chat-item,
-body.pin-wa-topbars .conversation-item {
-  background: var(--hc-bg-surface);
-  color: var(--hc-text-main);
-  border-color: var(--hc-border);
-}
-
-body.pin-wa-topbars aside h1,
-body.pin-wa-topbars aside h2,
-body.pin-wa-topbars aside h3,
-body.pin-wa-topbars aside p,
-body.pin-wa-topbars aside span,
-body.pin-wa-topbars aside label,
-body.pin-wa-topbars .sidebar h1,
-body.pin-wa-topbars .sidebar h2,
-body.pin-wa-topbars .sidebar h3,
-body.pin-wa-topbars .sidebar p,
-body.pin-wa-topbars .sidebar span,
-body.pin-wa-topbars .sidebar label,
-body.pin-wa-topbars .chat-item *,
-body.pin-wa-topbars .conversation-item * {
-  color: var(--hc-text-main);
-}
-
-body.pin-wa-topbars .chat-item small,
-body.pin-wa-topbars .conversation-item small,
-body.pin-wa-topbars .muted,
-body.pin-wa-topbars .hint {
-  color: var(--hc-text-secondary);
-}
-
-body.pin-wa-topbars .chat-item:hover,
-body.pin-wa-topbars .conversation-item:hover,
-body.pin-wa-topbars .chat-item.active,
-body.pin-wa-topbars .conversation-item.active {
-  background: #e0edff;
-  border-left: 3px solid var(--hc-blue);
-}
-
-/* Inputs, textareas y selects siempre claros con letra oscura */
-body.pin-wa-topbars input,
-body.pin-wa-topbars textarea,
-body.pin-wa-topbars select {
-  background: #ffffff;
-  color: var(--hc-text-main);
-  border: 1.5px solid #94a3b8;
-  border-radius: 8px;
-}
-
-body.pin-wa-topbars input::placeholder,
-body.pin-wa-topbars textarea::placeholder {
-  color: #64748b;
-}
-
-body.pin-wa-topbars input:focus,
-body.pin-wa-topbars textarea:focus,
-body.pin-wa-topbars select:focus {
-  outline: none;
-  border-color: var(--hc-blue);
-  box-shadow: 0 0 0 3px rgba(11, 87, 208, 0.16);
-}
-
-/* Botones con contraste alto */
-body.pin-wa-topbars button {
-  background: #f1f5f9;
-  color: var(--hc-text-main);
-  border: 1px solid #94a3b8;
-  font-weight: 600;
-}
-
-body.pin-wa-topbars button:hover {
-  background: #e2e8f0;
-}
-
-body.pin-wa-topbars button.primary,
-body.pin-wa-topbars .btn-primary,
-body.pin-wa-topbars [type="submit"] {
-  background: var(--hc-blue);
-  color: #ffffff;
-  border-color: var(--hc-blue);
-}
-
-body.pin-wa-topbars button.primary:hover,
-body.pin-wa-topbars .btn-primary:hover,
-body.pin-wa-topbars [type="submit"]:hover {
-  background: var(--hc-blue-hover);
-  border-color: var(--hc-blue-hover);
-}
-
-/* Área de mensajes y burbujas con lectura clara */
-body.pin-wa-topbars .messages,
-body.pin-wa-topbars .message-list,
-body.pin-wa-topbars .chat-messages {
-  background-color: var(--hc-bg-soft);
+#messages-list {
+  display: flex !important;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 180px;
+  padding: 14px;
+  background-color: var(--pin-soft) !important;
   background-image: radial-gradient(rgba(15, 41, 74, 0.06) 1px, transparent 0);
   background-size: 20px 20px;
-  color: var(--hc-text-main);
 }
 
-body.pin-wa-topbars .messages > p,
-body.pin-wa-topbars .chat-messages > p,
-body.pin-wa-topbars .empty-state,
-body.pin-wa-topbars .empty-state * {
-  color: var(--hc-text-secondary);
-}
-
-body.pin-wa-topbars .message,
-body.pin-wa-topbars .msg-item,
-body.pin-wa-topbars .chat-message {
-  background: var(--hc-bubble-in);
-  color: var(--hc-text-main);
-  border: 1px solid var(--hc-border);
-  border-radius: 10px;
-  border-top-left-radius: 2px;
+/* Burbujas reales de PIN-MLS */
+.msg-bubble {
+  max-width: min(74%, 640px);
+  width: fit-content;
+  padding: 8px 12px;
+  border-radius: 12px;
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
 }
 
-body.pin-wa-topbars .message *,
-body.pin-wa-topbars .msg-item *,
-body.pin-wa-topbars .chat-message * {
-  color: var(--hc-text-main);
+.msg-bubble.theirs {
+  align-self: flex-start;
+  background: var(--pin-bubble-theirs) !important;
+  color: var(--pin-ink) !important;
+  border: 1px solid var(--pin-border) !important;
+  border-top-left-radius: 2px;
 }
 
-body.pin-wa-topbars .message.outgoing,
-body.pin-wa-topbars .msg-item.outgoing,
-body.pin-wa-topbars .chat-message.outgoing,
-body.pin-wa-topbars .message.self,
-body.pin-wa-topbars .message.me,
-body.pin-wa-topbars .message.sent,
-body.pin-wa-topbars [data-outgoing="true"] {
-  background: var(--hc-bubble-out);
-  color: #041e49;
-  border: 1px solid #93c5fd;
-  border-radius: 10px;
+.msg-bubble.theirs * {
+  color: var(--pin-ink) !important;
+}
+
+.msg-bubble.mine {
+  align-self: flex-end;
+  margin-left: auto;
+  background: var(--pin-bubble-mine) !important;
+  color: #041e49 !important;
+  border: 1px solid #93c5fd !important;
   border-top-right-radius: 2px;
 }
 
-body.pin-wa-topbars .message.outgoing *,
-body.pin-wa-topbars .msg-item.outgoing *,
-body.pin-wa-topbars .chat-message.outgoing *,
-body.pin-wa-topbars .message.self *,
-body.pin-wa-topbars .message.me *,
-body.pin-wa-topbars .message.sent *,
-body.pin-wa-topbars [data-outgoing="true"] * {
-  color: #041e49;
+.msg-bubble.mine * {
+  color: #041e49 !important;
 }
 
-/* Modales siempre con fondo blanco y texto oscuro legible */
-dialog,
-.modal,
-[role="dialog"] {
-  background: #ffffff;
-  color: var(--hc-text-main);
-  border: 1.5px solid #94a3b8;
+.msg-meta {
+  font-size: 0.75rem;
+  color: var(--pin-ink-sub) !important;
+  margin-top: 4px;
+}
+
+/* Banners, formularios, inputs y botones */
+#global-status,
+#mnemonic-banner,
+#onboarding-status {
+  background: var(--pin-white) !important;
+  color: var(--pin-ink) !important;
+  border: 1px solid var(--pin-border) !important;
+}
+
+#global-status *,
+#mnemonic-banner *,
+#onboarding-status * {
+  color: var(--pin-ink) !important;
+}
+
+input,
+textarea,
+select {
+  background: #ffffff !important;
+  color: var(--pin-ink) !important;
+  border: 1px solid #94a3b8 !important;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: #64748b !important;
+}
+
+button,
+.btn-secondary {
+  background: #f1f5f9 !important;
+  color: var(--pin-ink) !important;
+  border: 1px solid #94a3b8 !important;
+}
+
+button.btn-primary,
+[type="submit"] {
+  background: var(--pin-blue) !important;
+  color: #ffffff !important;
+  border-color: var(--pin-blue) !important;
+}
+
+button.btn-primary:hover,
+[type="submit"]:hover {
+  background: var(--pin-blue-dark) !important;
+}
+
+/* Modales nativos <dialog> con fondo blanco y texto oscuro nítido */
+dialog#safe-dialog,
+dialog#link-wait-dialog,
+dialog#devices-dialog,
+dialog {
+  background: #ffffff !important;
+  color: var(--pin-ink) !important;
+  border: 1.5px solid #94a3b8 !important;
   border-radius: 12px;
   max-width: min(94vw, 560px);
   max-height: 88vh;
   overflow-y: auto;
   z-index: 9500;
-  box-sizing: border-box;
-  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.25);
 }
 
 dialog *,
-.modal *,
-[role="dialog"] * {
-  color: var(--hc-text-main);
+dialog p,
+dialog span,
+dialog label,
+dialog h1,
+dialog h2,
+dialog h3 {
+  color: var(--pin-ink) !important;
 }
 
-dialog button.primary,
-.modal button.primary,
-[role="dialog"] button.primary {
-  background: var(--hc-blue);
-  color: #ffffff;
-}
-
-/* Notificación emergente de alto contraste */
+/* Notificación emergente arriba a la derecha */
 .pin-top-toast-container {
   position: fixed;
   top: 14px;
@@ -1264,9 +1263,10 @@ dialog button.primary,
 }
 
 .pin-top-toast {
-  background: #ffffff;
-  border: 1px solid var(--hc-border);
-  border-left: 5px solid var(--hc-blue);
+  background: #ffffff !important;
+  color: var(--pin-ink) !important;
+  border: 1px solid var(--pin-border) !important;
+  border-left: 5px solid var(--pin-blue) !important;
   border-radius: 10px;
   padding: 10px 14px;
   box-shadow: 0 8px 24px rgba(15, 23, 42, 0.18);
@@ -1281,15 +1281,15 @@ dialog button.primary,
 .pin-top-toast-title {
   font-weight: 700;
   font-size: 0.92rem;
-  color: var(--hc-text-main);
+  color: var(--pin-ink) !important;
   margin-bottom: 2px;
 }
 
 .pin-top-toast-body {
   font-size: 0.85rem;
-  color: var(--hc-text-secondary);
+  color: var(--pin-ink-sub) !important;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-/* === PIN_HIGH_CONTRAST_BW_END === */
+/* === PIN_REAL_DOM_BW_END === */

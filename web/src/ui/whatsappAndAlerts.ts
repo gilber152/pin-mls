@@ -142,7 +142,7 @@ class SoundAndNotificationController {
           notif.close();
         };
       } catch {
-        // Ignorado si el entorno no soporta notificaciones nativas
+        // Ignorado si no está disponible
       }
     }
 
@@ -154,7 +154,7 @@ class SoundAndNotificationController {
 
     const seedExisting = () => {
       document
-        .querySelectorAll<HTMLElement>('.message, .msg-item, .chat-message, [data-message-id]')
+        .querySelectorAll<HTMLElement>('.msg-bubble, [data-message-id]')
         .forEach((el) => {
           const key = el.getAttribute('data-message-id') || (el.textContent || '').trim();
           if (key) this.seenMessageKeys.add(key);
@@ -169,21 +169,12 @@ class SoundAndNotificationController {
           if (!(node instanceof HTMLElement)) return;
           if (node.closest('#pin-top-toast-container')) return;
 
-          const candidates = node.matches('.message, .msg-item, .chat-message, [data-message-id]')
+          const candidates = node.matches('.msg-bubble, [data-message-id]')
             ? [node]
-            : Array.from(
-                node.querySelectorAll<HTMLElement>('.message, .msg-item, .chat-message, [data-message-id]')
-              );
+            : Array.from(node.querySelectorAll<HTMLElement>('.msg-bubble, [data-message-id]'));
 
           for (const el of candidates) {
-            const isOutgoing =
-              el.classList.contains('outgoing') ||
-              el.classList.contains('self') ||
-              el.classList.contains('me') ||
-              el.classList.contains('sent') ||
-              el.getAttribute('data-outgoing') === 'true';
-
-            if (isOutgoing) continue;
+            if (el.classList.contains('mine')) continue;
 
             const text = (el.textContent || '').trim().replace(/\s+/g, ' ');
             if (!text) continue;
@@ -206,18 +197,7 @@ class SoundAndNotificationController {
 
 export const waAlerts = new SoundAndNotificationController();
 
-export function promoteActionBarsToTop(): void {
+export function applyWhatsAppLayoutClasses(): void {
   if (typeof document === 'undefined') return;
   document.body.classList.add('pin-wa-topbars');
-
-  const toolbars = document.querySelectorAll<HTMLElement>(
-    '.toolbar, .top-actions, .actions-bar, .header-actions, .chat-actions, nav.actions'
-  );
-  toolbars.forEach((bar) => {
-    bar.classList.add('pin-topbar-strip');
-  });
-}
-
-export function applyWhatsAppLayoutClasses(): void {
-  promoteActionBarsToTop();
 }
