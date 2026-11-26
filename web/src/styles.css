@@ -1427,3 +1427,65 @@ dialog h3 {
   line-height: 1.4 !important;
 }
 /* === PIN_TITLE_INVITES_FIX_END === */
+/* === PIN_PREVIEWS_ALIASES_CONTACTS_START === */
+#list-chats .list-card .muted-small,
+#list-chats .list-card small,
+#list-chats .list-card p {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: #334155 !important;
+}
+
+.pin-contacts-btn {
+  background: #0b57d0 !important;
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff !important;
+  border: 1px solid #0b57d0 !important;
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.pin-contacts-btn:hover {
+  background: #0842a0 !important;
+}
+
+.pin-contacts-popover {
+  position: fixed;
+  top: 56px;
+  right: 16px;
+  width: min(360px, 92vw);
+  max-height: 70vh;
+  overflow-y: auto;
+  background: #ffffff !important;
+  color: #0f172a !important;
+  border: 1.5px solid #94a3b8;
+  border-radius: 12px;
+  padding: 12px;
+  box-shadow: 0 14px 34px rgba(15, 23, 42, 0.22);
+  z-index: 9800;
+}
+
+.pin-contacts-popover * {
+  color: #0f172a !important;
+}
+
+.pin-contacts-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  margin-top: 8px;
+  background: #f8fafc !important;
+}
+
+.pin-contacts-row:hover {
+  background: #e0edff !important;
+}
+/* === PIN_PREVIEWS_ALIASES_CONTACTS_END === */

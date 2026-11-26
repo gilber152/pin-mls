@@ -4,6 +4,9 @@ export interface IncomingMessageAlert {
   groupId?: string;
 }
 
+const ALIAS_STORAGE_KEY = 'pin_mls_pin_aliases_v1';
+const PIN_PATTERN = /\b[A-Z0-9]{4}-[A-Z0-9]{4}\b/g;
+
 export function extractCleanMessageText(rawText: string): string {
   const trimmed = rawText.trim();
   if (!trimmed) return '';
@@ -26,7 +29,17 @@ export function extractCleanMessageText(rawText: string): string {
   const direct = tryParse(trimmed);
   if (direct !== null) return direct;
 
-  const jsonMatch = trimmed.match(/\{[\s\S]*"__pin_v"[\s\S]*"text"\s*:\s*"[\s\S]*?"\s*\}/);
+  // Coincide con objetos tipo {"__pin_v":2,...,"text":"..."} incluso si vienen truncados o con prefijo
+  const quotedTextMatch = trimmed.match(/"text"\s*:\s*"((?:\\.|[^"\\])*)"/);
+  if (quotedTextMatch && quotedTextMatch[1] !== undefined) {
+    try {
+      return JSON.parse(`"${quotedTextMatch[1]}"`) as string;
+    } catch {
+      return quotedTextMatch[1];
+    }
+  }
+
+  const jsonMatch = trimmed.match(/\{[\s\S]*"__pin_v"[\s\S]*\}/);
   if (jsonMatch) {
     const extracted = tryParse(jsonMatch[0]);
     if (extracted !== null) return extracted;
@@ -42,8 +55,11 @@ class SoundAndNotificationController {
   private desktopNotifEnabled = true;
   private seenMessageKeys = new Set<string>();
   private observer: MutationObserver | null = null;
+  private aliases: Record<string, string> = {};
+  private syncingUi = false;
 
   constructor() {
+    this.loadAliases();
     if (typeof window !== 'undefined') {
       const onGesture = () => {
         this.userInteracted = true;
@@ -54,6 +70,58 @@ class SoundAndNotificationController {
       window.addEventListener('pointerdown', onGesture, { passive: true });
       window.addEventListener('keydown', onGesture, { passive: true });
     }
+  }
+
+  private loadAliases(): void {
+    if (typeof window === 'undefined') return;
+    try {
+      const raw = window.localStorage.getItem(ALIAS_STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw) as Record<string, string>;
+        if (parsed && typeof parsed === 'object') {
+          this.aliases = parsed;
+        }
+      }
+    } catch {
+      this.aliases = {};
+    }
+  }
+
+  private saveAliases(): void {
+    if (typeof window === 'undefined') return;
+    try {
+      window.localStorage.setItem(ALIAS_STORAGE_KEY, JSON.stringify(this.aliases));
+    } catch {
+      // Ignorado si storage no está disponible
+    }
+  }
+
+  setPinAlias(pin: string, alias: string): void {
+    const cleanPin = pin.trim().toUpperCase();
+    const cleanAlias = alias.trim();
+    if (!cleanPin) return;
+    if (cleanAlias) {
+      this.aliases[cleanPin] = cleanAlias;
+    } else {
+      delete this.aliases[cleanPin];
+    }
+    this.saveAliases();
+    this.syncAllViews();
+  }
+
+  getAliasForPin(pin: string): string | undefined {
+    return this.aliases[pin.trim().toUpperCase()];
+  }
+
+  replacePinsWithAliasesInText(text: string): string {
+    let result = text;
+    for (const [pin, alias] of Object.entries(this.aliases)) {
+      if (!alias) continue;
+      const escapedPin = pin.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const re = new RegExp(`\\b${escapedPin}\\b`, 'gi');
+      result = result.replace(re, `${alias} (${pin})`);
+    }
+    return result;
   }
 
   private ensureContextAfterGesture(): AudioContext | null {
@@ -138,11 +206,11 @@ class SoundAndNotificationController {
 
     const title = document.createElement('div');
     title.className = 'pin-top-toast-title';
-    title.textContent = alert.senderLabel;
+    title.textContent = this.replacePinsWithAliasesInText(alert.senderLabel);
 
     const body = document.createElement('div');
     body.className = 'pin-top-toast-body';
-    body.textContent = extractCleanMessageText(alert.previewText);
+    body.textContent = this.replacePinsWithAliasesInText(extractCleanMessageText(alert.previewText));
 
     toast.append(title, body);
     container.appendChild(toast);
@@ -154,8 +222,9 @@ class SoundAndNotificationController {
   }
 
   async notifyIncomingMessage(alert: IncomingMessageAlert): Promise<void> {
-    const cleanPreview = extractCleanMessageText(alert.previewText);
-    this.showInAppToast({ ...alert, previewText: cleanPreview });
+    const cleanPreview = this.replacePinsWithAliasesInText(extractCleanMessageText(alert.previewText));
+    const cleanSender = this.replacePinsWithAliasesInText(alert.senderLabel);
+    this.showInAppToast({ ...alert, senderLabel: cleanSender, previewText: cleanPreview });
 
     if (
       this.desktopNotifEnabled &&
@@ -165,7 +234,7 @@ class SoundAndNotificationController {
       (document.hidden || !document.hasFocus())
     ) {
       try {
-        const notif = new Notification(alert.senderLabel, {
+        const notif = new Notification(cleanSender, {
           body: cleanPreview,
           tag: alert.groupId ? `pin-mls-${alert.groupId}` : 'pin-mls-msg',
         });
@@ -191,7 +260,7 @@ class SoundAndNotificationController {
       bodySource += child.textContent || '';
     }
 
-    const cleanedBody = extractCleanMessageText(bodySource);
+    const cleanedBody = this.replacePinsWithAliasesInText(extractCleanMessageText(bodySource));
     if (cleanedBody && cleanedBody.trim() !== bodySource.trim()) {
       for (const child of Array.from(bubble.childNodes)) {
         if (child !== metaEl) {
@@ -209,6 +278,61 @@ class SoundAndNotificationController {
     }
 
     return cleanedBody || (bubble.textContent || '').replace(metaText, '').trim();
+  }
+
+  private sanitizeChatListPreviews(): void {
+    if (typeof document === 'undefined') return;
+    const chatCards = document.querySelectorAll<HTMLElement>('#list-chats .list-card');
+    chatCards.forEach((card) => {
+      const previewEls = card.querySelectorAll<HTMLElement>('.muted-small, small, p');
+      previewEls.forEach((el) => {
+        const raw = el.textContent || '';
+        const cleaned = this.replacePinsWithAliasesInText(extractCleanMessageText(raw));
+        if (cleaned && cleaned !== raw.trim()) {
+          el.textContent = cleaned;
+        }
+      });
+
+      const titleEls = card.querySelectorAll<HTMLElement>('strong, b, h3, h4, .card-row > span:first-child');
+      titleEls.forEach((el) => {
+        const raw = el.textContent || '';
+        const updated = this.replacePinsWithAliasesInText(raw);
+        if (updated !== raw) {
+          el.textContent = updated;
+        }
+      });
+    });
+
+    const activeTitle = document.getElementById('active-chat-title');
+    if (activeTitle && activeTitle.textContent) {
+      const updatedTitle = this.replacePinsWithAliasesInText(activeTitle.textContent);
+      if (updatedTitle !== activeTitle.textContent) {
+        activeTitle.textContent = updatedTitle;
+      }
+    }
+  }
+
+  private captureAliasInputsFromDom(): void {
+    if (typeof document === 'undefined') return;
+    const aliasInputs = document.querySelectorAll<HTMLInputElement>(
+      'input[id*="alias" i], input[placeholder*="alias" i], input[aria-label*="alias" i]'
+    );
+    aliasInputs.forEach((input) => {
+      const val = input.value.trim();
+      if (!val) return;
+      const scope = input.closest<HTMLElement>('dialog, [role="dialog"], .modal, .card, form, section, body');
+      const scopeText = scope ? scope.textContent || '' : '';
+      const pins = scopeText.match(PIN_PATTERN) || [];
+      if (pins.length > 0) {
+        const firstPin = pins[0];
+      if (!firstPin) return;
+      const targetPin = firstPin.toUpperCase();
+        if (this.aliases[targetPin] !== val) {
+          this.aliases[targetPin] = val;
+          this.saveAliases();
+        }
+      }
+    });
   }
 
   syncInvitesVisibility(): void {
@@ -232,11 +356,174 @@ class SoundAndNotificationController {
     }
   }
 
+  private collectSavedContacts(): Array<{ pin: string; label: string; element: HTMLElement }> {
+    if (typeof document === 'undefined') return [];
+    const contacts: Array<{ pin: string; label: string; element: HTMLElement }> = [];
+    const seenPins = new Set<string>();
+
+    document.querySelectorAll<HTMLElement>('#list-chats .list-card').forEach((card) => {
+      const text = (card.textContent || '').trim();
+      const pins = text.match(PIN_PATTERN) || [];
+      const pin = (pins[0] || text.split('\n')[0] || '').trim().toUpperCase();
+      if (!pin || seenPins.has(pin)) return;
+      seenPins.add(pin);
+      const alias = this.getAliasForPin(pin);
+      const label = alias ? `${alias} · ${pin}` : pin;
+      contacts.push({ pin, label, element: card });
+    });
+
+    for (const [pin, alias] of Object.entries(this.aliases)) {
+      const upper = pin.toUpperCase();
+      if (!seenPins.has(upper)) {
+        seenPins.add(upper);
+        const dummy = document.createElement('div');
+        contacts.push({
+          pin: upper,
+          label: alias ? `${alias} · ${upper}` : upper,
+          element: dummy,
+        });
+      }
+    }
+
+    return contacts;
+  }
+
+  private openContactsSearchPopover(): void {
+    if (typeof document === 'undefined') return;
+    const existing = document.getElementById('pin-contacts-popover');
+    if (existing) {
+      existing.remove();
+      return;
+    }
+
+    const popover = document.createElement('div');
+    popover.id = 'pin-contacts-popover';
+    popover.className = 'pin-contacts-popover';
+    popover.setAttribute('role', 'dialog');
+
+    const header = document.createElement('div');
+    header.style.display = 'flex';
+    header.style.justifyContent = 'space-between';
+    header.style.alignItems = 'center';
+    header.style.marginBottom = '8px';
+
+    const title = document.createElement('strong');
+    title.textContent = 'Contactos guardados';
+
+    const closeBtn = document.createElement('button');
+    closeBtn.type = 'button';
+    closeBtn.textContent = 'Cerrar';
+    closeBtn.addEventListener('click', () => popover.remove());
+
+    header.append(title, closeBtn);
+
+    const searchInput = document.createElement('input');
+    searchInput.type = 'search';
+    searchInput.placeholder = 'Buscar por alias o PIN...';
+    searchInput.style.width = '100%';
+    searchInput.style.padding = '8px 10px';
+    searchInput.style.boxSizing = 'border-box';
+
+    const resultsBox = document.createElement('div');
+
+    const renderList = (query: string) => {
+      resultsBox.innerHTML = '';
+      const q = query.trim().toLowerCase();
+      const all = this.collectSavedContacts().filter(
+        (c) => !q || c.label.toLowerCase().includes(q) || c.pin.toLowerCase().includes(q)
+      );
+
+      if (all.length === 0) {
+        const empty = document.createElement('p');
+        empty.className = 'muted-small';
+        empty.style.marginTop = '10px';
+        empty.textContent = 'No se encontraron contactos guardados.';
+        resultsBox.appendChild(empty);
+        return;
+      }
+
+      for (const item of all) {
+        const row = document.createElement('div');
+        row.className = 'pin-contacts-row';
+
+        const nameSpan = document.createElement('span');
+        nameSpan.textContent = item.label;
+
+        const openBtn = document.createElement('button');
+        openBtn.type = 'button';
+        openBtn.className = 'btn-primary';
+        openBtn.textContent = 'Abrir';
+        openBtn.addEventListener('click', () => {
+          if (item.element.isConnected) {
+            item.element.click();
+            item.element.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+          } else {
+            const inviteInput = document.getElementById('input-invite-pin') as HTMLInputElement | null;
+            if (inviteInput) {
+              inviteInput.value = item.pin;
+              inviteInput.dispatchEvent(new Event('input', { bubbles: true }));
+            }
+          }
+          popover.remove();
+        });
+
+        row.append(nameSpan, openBtn);
+        resultsBox.appendChild(row);
+      }
+    };
+
+    searchInput.addEventListener('input', () => renderList(searchInput.value));
+    renderList('');
+
+    popover.append(header, searchInput, resultsBox);
+    document.body.appendChild(popover);
+    searchInput.focus();
+  }
+
+  installContactsSearchButton(): void {
+    if (typeof document === 'undefined') return;
+    if (document.getElementById('btn-search-saved-contacts')) return;
+
+    const btn = document.createElement('button');
+    btn.id = 'btn-search-saved-contacts';
+    btn.type = 'button';
+    btn.className = 'pin-contacts-btn';
+    btn.textContent = 'Contactos';
+    btn.title = 'Buscar contactos guardados';
+    btn.addEventListener('click', () => this.openContactsSearchPopover());
+
+    const searchInput = document.querySelector<HTMLElement>(
+      'input[placeholder*="Buscar" i], input[id*="search" i]'
+    );
+    if (searchInput && searchInput.parentElement) {
+      searchInput.parentElement.appendChild(btn);
+    } else {
+      const header = document.querySelector<HTMLElement>('#view-chat > header, header, .topbar');
+      if (header) header.appendChild(btn);
+    }
+  }
+
+  syncAllViews(): void {
+    if (typeof document === 'undefined' || this.syncingUi) return;
+    this.syncingUi = true;
+    try {
+      this.captureAliasInputsFromDom();
+      this.syncInvitesVisibility();
+      this.sanitizeChatListPreviews();
+      this.installContactsSearchButton();
+      document.querySelectorAll<HTMLElement>('.msg-bubble').forEach((el) => {
+        this.sanitizeBubbleNode(el);
+      });
+    } finally {
+      this.syncingUi = false;
+    }
+  }
+
   installIncomingDomWatcher(): void {
     if (typeof document === 'undefined' || this.observer) return;
 
     const seedExisting = () => {
-      this.syncInvitesVisibility();
+      this.syncAllViews();
       document.querySelectorAll<HTMLElement>('.msg-bubble, [data-message-id]').forEach((el) => {
         const cleanText = this.sanitizeBubbleNode(el);
         const key = el.getAttribute('data-message-id') || cleanText;
@@ -246,13 +533,28 @@ class SoundAndNotificationController {
 
     seedExisting();
 
+    if (typeof window !== 'undefined') {
+      (window as unknown as { pinSetAlias?: (pin: string, alias: string) => void }).pinSetAlias = (
+        pin: string,
+        alias: string
+      ) => this.setPinAlias(pin, alias);
+
+      document.addEventListener('input', () => {
+        this.captureAliasInputsFromDom();
+      });
+      document.addEventListener('change', () => {
+        this.captureAliasInputsFromDom();
+        this.syncAllViews();
+      });
+    }
+
     this.observer = new MutationObserver((mutations) => {
-      this.syncInvitesVisibility();
+      this.syncAllViews();
 
       for (const mut of mutations) {
         mut.addedNodes.forEach((node) => {
           if (!(node instanceof HTMLElement)) return;
-          if (node.closest('#pin-top-toast-container')) return;
+          if (node.closest('#pin-top-toast-container') || node.closest('#pin-contacts-popover')) return;
 
           const candidates = node.matches('.msg-bubble, [data-message-id]')
             ? [node]
