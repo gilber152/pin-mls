@@ -1489,3 +1489,35 @@ dialog h3 {
   background: #e0edff !important;
 }
 /* === PIN_PREVIEWS_ALIASES_CONTACTS_END === */
+/* === PIN_ALIAS_SUBCODE_START === */
+.pin-alias-wrap {
+  display: inline-flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.pin-alias-name {
+  font-weight: 700;
+  color: inherit;
+}
+
+.pin-sub-code {
+  font-size: 0.74rem !important;
+  font-weight: 500 !important;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  opacity: 0.78 !important;
+  letter-spacing: 0.02em;
+}
+
+#list-chats .list-card .pin-alias-wrap {
+  flex-direction: column;
+  gap: 1px;
+}
+
+#active-chat-title .pin-sub-code {
+  color: #dbeafe !important;
+  -webkit-text-fill-color: #dbeafe !important;
+  opacity: 0.9 !important;
+}
+/* === PIN_ALIAS_SUBCODE_END === */

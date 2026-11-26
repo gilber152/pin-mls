@@ -7,6 +7,10 @@ export interface IncomingMessageAlert {
 const ALIAS_STORAGE_KEY = 'pin_mls_pin_aliases_v1';
 const PIN_PATTERN = /\b[A-Z0-9]{4}-[A-Z0-9]{4}\b/g;
 
+function escapeRegexLiteral(input: string): string {
+  return input.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 export function extractCleanMessageText(rawText: string): string {
   const trimmed = rawText.trim();
   if (!trimmed) return '';
@@ -29,7 +33,6 @@ export function extractCleanMessageText(rawText: string): string {
   const direct = tryParse(trimmed);
   if (direct !== null) return direct;
 
-  // Coincide con objetos tipo {"__pin_v":2,...,"text":"..."} incluso si vienen truncados o con prefijo
   const quotedTextMatch = trimmed.match(/"text"\s*:\s*"((?:\\.|[^"\\])*)"/);
   if (quotedTextMatch && quotedTextMatch[1] !== undefined) {
     try {
@@ -116,10 +119,14 @@ class SoundAndNotificationController {
   replacePinsWithAliasesInText(text: string): string {
     let result = text;
     for (const [pin, alias] of Object.entries(this.aliases)) {
-      if (!alias) continue;
-      const escapedPin = pin.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      const re = new RegExp(`\\b${escapedPin}\\b`, 'gi');
-      result = result.replace(re, `${alias} (${pin})`);
+      const cleanAlias = (alias || '').trim();
+      if (!cleanAlias) continue;
+      const escapedPin = escapeRegexLiteral(pin);
+      const escapedAlias = escapeRegexLiteral(cleanAlias);
+      const reAlready = new RegExp(`\\b${escapedAlias}\\s*\\(${escapedPin}\\)`, 'gi');
+      result = result.replace(reAlready, `${cleanAlias} (${pin})`);
+      const reBare = new RegExp(`\\b${escapedPin}\\b`, 'gi');
+      result = result.replace(reBare, `${cleanAlias} (${pin})`);
     }
     return result;
   }
@@ -280,6 +287,39 @@ class SoundAndNotificationController {
     return cleanedBody || (bubble.textContent || '').replace(metaText, '').trim();
   }
 
+  private renderAliasElement(el: HTMLElement): void {
+    const raw = (el.textContent || '').trim();
+    if (!raw) return;
+
+    for (const [pin, alias] of Object.entries(this.aliases)) {
+      const cleanAlias = (alias || '').trim();
+      if (!cleanAlias) continue;
+      const upperPin = pin.toUpperCase();
+      if (!raw.toUpperCase().includes(upperPin)) continue;
+
+      const suffix = raw
+        .replace(new RegExp(`\\b${escapeRegexLiteral(cleanAlias)}\\s*\\(${escapeRegexLiteral(upperPin)}\\)`, 'i'), '')
+        .replace(new RegExp(`\\b(?:PIN\\s*)?${escapeRegexLiteral(upperPin)}\\b`, 'i'), '')
+        .trim();
+
+      el.textContent = '';
+      const wrap = document.createElement('span');
+      wrap.className = 'pin-alias-wrap';
+
+      const nameEl = document.createElement('span');
+      nameEl.className = 'pin-alias-name';
+      nameEl.textContent = cleanAlias;
+
+      const pinEl = document.createElement('span');
+      pinEl.className = 'pin-sub-code';
+      pinEl.textContent = suffix ? `${upperPin} ${suffix}` : upperPin;
+
+      wrap.append(nameEl, pinEl);
+      el.appendChild(wrap);
+      return;
+    }
+  }
+
   private sanitizeChatListPreviews(): void {
     if (typeof document === 'undefined') return;
     const chatCards = document.querySelectorAll<HTMLElement>('#list-chats .list-card');
@@ -295,20 +335,13 @@ class SoundAndNotificationController {
 
       const titleEls = card.querySelectorAll<HTMLElement>('strong, b, h3, h4, .card-row > span:first-child');
       titleEls.forEach((el) => {
-        const raw = el.textContent || '';
-        const updated = this.replacePinsWithAliasesInText(raw);
-        if (updated !== raw) {
-          el.textContent = updated;
-        }
+        this.renderAliasElement(el);
       });
     });
 
     const activeTitle = document.getElementById('active-chat-title');
     if (activeTitle && activeTitle.textContent) {
-      const updatedTitle = this.replacePinsWithAliasesInText(activeTitle.textContent);
-      if (updatedTitle !== activeTitle.textContent) {
-        activeTitle.textContent = updatedTitle;
-      }
+      this.renderAliasElement(activeTitle);
     }
   }
 
@@ -323,10 +356,9 @@ class SoundAndNotificationController {
       const scope = input.closest<HTMLElement>('dialog, [role="dialog"], .modal, .card, form, section, body');
       const scopeText = scope ? scope.textContent || '' : '';
       const pins = scopeText.match(PIN_PATTERN) || [];
-      if (pins.length > 0) {
-        const firstPin = pins[0];
-      if (!firstPin) return;
-      const targetPin = firstPin.toUpperCase();
+      const firstPin = pins[0];
+      if (firstPin) {
+        const targetPin = firstPin.toUpperCase();
         if (this.aliases[targetPin] !== val) {
           this.aliases[targetPin] = val;
           this.saveAliases();
@@ -356,9 +388,9 @@ class SoundAndNotificationController {
     }
   }
 
-  private collectSavedContacts(): Array<{ pin: string; label: string; element: HTMLElement }> {
+  private collectSavedContacts(): Array<{ pin: string; element: HTMLElement }> {
     if (typeof document === 'undefined') return [];
-    const contacts: Array<{ pin: string; label: string; element: HTMLElement }> = [];
+    const contacts: Array<{ pin: string; element: HTMLElement }> = [];
     const seenPins = new Set<string>();
 
     document.querySelectorAll<HTMLElement>('#list-chats .list-card').forEach((card) => {
@@ -367,21 +399,14 @@ class SoundAndNotificationController {
       const pin = (pins[0] || text.split('\n')[0] || '').trim().toUpperCase();
       if (!pin || seenPins.has(pin)) return;
       seenPins.add(pin);
-      const alias = this.getAliasForPin(pin);
-      const label = alias ? `${alias} · ${pin}` : pin;
-      contacts.push({ pin, label, element: card });
+      contacts.push({ pin, element: card });
     });
 
-    for (const [pin, alias] of Object.entries(this.aliases)) {
+    for (const pin of Object.keys(this.aliases)) {
       const upper = pin.toUpperCase();
       if (!seenPins.has(upper)) {
         seenPins.add(upper);
-        const dummy = document.createElement('div');
-        contacts.push({
-          pin: upper,
-          label: alias ? `${alias} · ${upper}` : upper,
-          element: dummy,
-        });
+        contacts.push({ pin: upper, element: document.createElement('div') });
       }
     }
 
@@ -429,9 +454,10 @@ class SoundAndNotificationController {
     const renderList = (query: string) => {
       resultsBox.innerHTML = '';
       const q = query.trim().toLowerCase();
-      const all = this.collectSavedContacts().filter(
-        (c) => !q || c.label.toLowerCase().includes(q) || c.pin.toLowerCase().includes(q)
-      );
+      const all = this.collectSavedContacts().filter((c) => {
+        const alias = (this.getAliasForPin(c.pin) || '').toLowerCase();
+        return !q || alias.includes(q) || c.pin.toLowerCase().includes(q);
+      });
 
       if (all.length === 0) {
         const empty = document.createElement('p');
@@ -447,7 +473,19 @@ class SoundAndNotificationController {
         row.className = 'pin-contacts-row';
 
         const nameSpan = document.createElement('span');
-        nameSpan.textContent = item.label;
+        nameSpan.className = 'pin-alias-wrap';
+        const aliasOnly = this.getAliasForPin(item.pin);
+        if (aliasOnly) {
+          const aEl = document.createElement('span');
+          aEl.className = 'pin-alias-name';
+          aEl.textContent = aliasOnly;
+          const pEl = document.createElement('span');
+          pEl.className = 'pin-sub-code';
+          pEl.textContent = item.pin;
+          nameSpan.append(aEl, pEl);
+        } else {
+          nameSpan.textContent = item.pin;
+        }
 
         const openBtn = document.createElement('button');
         openBtn.type = 'button';
