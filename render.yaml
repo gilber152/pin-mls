@@ -30,7 +30,7 @@ services:
         sync: false
       - key: COOLDOWN_PEPPER_HEX
         sync: false
-      - key: CORS_ORIGIN
+      - key: ALLOWED_WEB_ORIGINS
         sync: false
 
   - type: keyvalue
