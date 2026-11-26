@@ -26,10 +26,10 @@ services:
         sync: false
       - key: JWT_PUBLIC_KEY_PEM
         sync: false
-      - key: POW_SECRET_HEX
-        generateValue: true
-      - key: COOLDOWN_SECRET_HEX
-        generateValue: true
+      - key: POW_HMAC_SECRET_HEX
+        sync: false
+      - key: COOLDOWN_PEPPER_HEX
+        sync: false
       - key: CORS_ORIGIN
         sync: false
 
