@@ -1,3 +1,4 @@
+import { applyWhatsAppLayoutClasses, waAlerts } from './ui/whatsappAndAlerts.js';
 import type { VaultGroup, VaultState } from './types.js';
 import { loadVault, saveVault, wipeVault } from './storage/vaultDb.js';
 import { CryptoWorkerClient, type StartedLinkSessionDto } from './worker/workerClient.js';
@@ -1488,3 +1489,16 @@ void initStep4GroupsAndPresence({
   __pinStep4Ctrl = ctrl;
   (window as unknown as { __pinStep4?: Step4Controller }).__pinStep4 = ctrl;
 });
+
+(() => {
+  const bootWa = () => {
+    applyWhatsAppLayoutClasses();
+    waAlerts.installIncomingDomWatcher();
+    void waAlerts.requestNotificationPermissionIfNeeded();
+  };
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", bootWa, { once: true });
+  } else {
+    bootWa();
+  }
+})();
