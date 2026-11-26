@@ -1347,3 +1347,55 @@ dialog h3 {
   margin-top: 4px;
 }
 /* === PIN_BUBBLE_TEXT_FIX_END === */
+/* === PIN_HIDE_EMPTY_BLUE_BTNS_START === */
+#chat-empty,
+#chat-empty:not([hidden]),
+[id*="chat-empty"] {
+  display: none !important;
+  visibility: hidden !important;
+  height: 0 !important;
+  min-height: 0 !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  overflow: hidden !important;
+  pointer-events: none !important;
+}
+
+#btn-sync-now,
+#btn-open-devices,
+#btn-open-safe,
+#btn-wipe-vault,
+#btn-copy-pin,
+#view-chat > header button,
+#view-chat .topbar button,
+#view-chat .app-header button,
+.pin-topbar-strip button,
+[class*="topbar"] button,
+[class*="toolbar"] button,
+[class*="header"] button {
+  background: #0b57d0 !important;
+  background-color: #0b57d0 !important;
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff !important;
+  border: 1px solid #0b57d0 !important;
+}
+
+#btn-sync-now:hover,
+#btn-open-devices:hover,
+#btn-open-safe:hover,
+#btn-wipe-vault:hover,
+#btn-copy-pin:hover,
+#view-chat > header button:hover,
+#view-chat .topbar button:hover,
+#view-chat .app-header button:hover,
+.pin-topbar-strip button:hover,
+[class*="topbar"] button:hover,
+[class*="toolbar"] button:hover,
+[class*="header"] button:hover {
+  background: #0842a0 !important;
+  background-color: #0842a0 !important;
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff !important;
+  border-color: #0842a0 !important;
+}
+/* === PIN_HIDE_EMPTY_BLUE_BTNS_END === */
