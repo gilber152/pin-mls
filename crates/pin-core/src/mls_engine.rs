@@ -1,4 +1,4 @@
-use std::io::Cursor;
+use base64::{engine::general_purpose::STANDARD, Engine as _};
 
 use openmls::prelude::*;
 use openmls_basic_credential::SignatureKeyPair;
@@ -29,12 +29,24 @@ impl PinMlsProvider {
     }
 
     pub fn from_json(json_str: &str) -> Result<Self, CoreError> {
-        if json_str.trim().is_empty() {
-            return Ok(Self::new_empty());
+        let storage = MemoryStorage::default();
+        if !json_str.trim().is_empty() {
+            let entries: Vec<(String, String)> = serde_json::from_str(json_str)
+                .map_err(|e| CoreError::Mls(format!("fallo cargando estado OpenMLS: {e}")))?;
+            let mut guard = storage
+                .values
+                .write()
+                .map_err(|_| CoreError::Mls("lock envenenado en MemoryStorage".into()))?;
+            for (k_b64, v_b64) in entries {
+                let k = STANDARD
+                    .decode(k_b64)
+                    .map_err(|e| CoreError::Mls(format!("clave OpenMLS inválida: {e}")))?;
+                let v = STANDARD
+                    .decode(v_b64)
+                    .map_err(|e| CoreError::Mls(format!("valor OpenMLS inválido: {e}")))?;
+                guard.insert(k, v);
+            }
         }
-        let mut cursor = Cursor::new(json_str.as_bytes());
-        let storage = MemoryStorage::load_from_file(&mut cursor)
-            .map_err(|e| CoreError::Mls(format!("fallo cargando estado OpenMLS: {e}")))?;
         Ok(Self {
             crypto: RustCrypto::default(),
             storage,
@@ -42,12 +54,17 @@ impl PinMlsProvider {
     }
 
     pub fn to_json(&self) -> Result<String, CoreError> {
-        let mut buf = Vec::new();
-        self.storage
-            .save_to_file(&mut buf)
-            .map_err(|e| CoreError::Mls(format!("fallo serializando estado OpenMLS: {e}")))?;
-        String::from_utf8(buf)
-            .map_err(|e| CoreError::Mls(format!("estado OpenMLS no es UTF-8: {e}")))
+        let guard = self
+            .storage
+            .values
+            .read()
+            .map_err(|_| CoreError::Mls("lock envenenado en MemoryStorage".into()))?;
+        let entries: Vec<(String, String)> = guard
+            .iter()
+            .map(|(k, v)| (STANDARD.encode(k), STANDARD.encode(v)))
+            .collect();
+        serde_json::to_string(&entries)
+            .map_err(|e| CoreError::Mls(format!("fallo serializando estado OpenMLS: {e}")))
     }
 }
 
@@ -213,7 +230,7 @@ pub fn generate_mls_key_package(
 ) -> Result<GeneratedMlsKeyPackage, CoreError> {
     let lifetime = Lifetime::new(KEY_PACKAGE_LIFETIME_SEC);
     let mut builder = KeyPackage::builder()
-        .lifetime(lifetime)
+        .key_package_lifetime(lifetime)
         .leaf_node_capabilities(Capabilities::new(
             None,
             Some(&[PIN_MLS_CIPHERSUITE]),
@@ -517,5 +534,19 @@ pub fn process_incoming_envelope(
                 sender_device_id,
             })
         }
+        ProcessedMessageContent::OwnPendingCommit => {
+            group
+                .merge_pending_commit(provider)
+                .map_err(|e| CoreError::Mls(format!("fallo en merge_pending_commit: {e:?}")))?;
+            Ok(ProcessedMlsOutcome::Commit {
+                epoch: group.epoch().as_u64(),
+                active: group.is_active(),
+                sender_pin,
+                sender_device_id,
+            })
+        }
+        ProcessedMessageContent::OwnPrivateMessage => Err(CoreError::Mls(
+            "mensaje propio ya procesado localmente".into(),
+        )),
     }
 }
