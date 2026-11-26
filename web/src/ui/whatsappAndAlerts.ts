@@ -4,6 +4,37 @@ export interface IncomingMessageAlert {
   groupId?: string;
 }
 
+export function extractCleanMessageText(rawText: string): string {
+  const trimmed = rawText.trim();
+  if (!trimmed) return '';
+
+  const tryParse = (candidate: string): string | null => {
+    try {
+      const parsed = JSON.parse(candidate) as unknown;
+      if (parsed && typeof parsed === 'object' && 'text' in parsed) {
+        const val = (parsed as { text?: unknown }).text;
+        if (typeof val === 'string' && val.trim().length > 0) {
+          return val;
+        }
+      }
+    } catch {
+      // No es JSON válido
+    }
+    return null;
+  };
+
+  const direct = tryParse(trimmed);
+  if (direct !== null) return direct;
+
+  const jsonMatch = trimmed.match(/\{[\s\S]*"__pin_v"[\s\S]*"text"\s*:\s*"[\s\S]*?"\s*\}/);
+  if (jsonMatch) {
+    const extracted = tryParse(jsonMatch[0]);
+    if (extracted !== null) return extracted;
+  }
+
+  return trimmed;
+}
+
 class SoundAndNotificationController {
   private audioCtx: AudioContext | null = null;
   private userInteracted = false;
@@ -87,7 +118,7 @@ class SoundAndNotificationController {
         osc.stop(now + n.start + n.duration + 0.02);
       }
     } catch {
-      // Ignorado si el navegador aún bloquea el audio
+      // Ignorado si el navegador bloquea el audio
     }
   }
 
@@ -111,7 +142,7 @@ class SoundAndNotificationController {
 
     const body = document.createElement('div');
     body.className = 'pin-top-toast-body';
-    body.textContent = alert.previewText;
+    body.textContent = extractCleanMessageText(alert.previewText);
 
     toast.append(title, body);
     container.appendChild(toast);
@@ -123,7 +154,8 @@ class SoundAndNotificationController {
   }
 
   async notifyIncomingMessage(alert: IncomingMessageAlert): Promise<void> {
-    this.showInAppToast(alert);
+    const cleanPreview = extractCleanMessageText(alert.previewText);
+    this.showInAppToast({ ...alert, previewText: cleanPreview });
 
     if (
       this.desktopNotifEnabled &&
@@ -134,7 +166,7 @@ class SoundAndNotificationController {
     ) {
       try {
         const notif = new Notification(alert.senderLabel, {
-          body: alert.previewText,
+          body: cleanPreview,
           tag: alert.groupId ? `pin-mls-${alert.groupId}` : 'pin-mls-msg',
         });
         notif.onclick = () => {
@@ -149,21 +181,74 @@ class SoundAndNotificationController {
     await this.playMessageTone();
   }
 
+  private sanitizeBubbleNode(bubble: HTMLElement): string {
+    const metaEl = bubble.querySelector<HTMLElement>('.msg-meta');
+    const metaText = metaEl ? (metaEl.textContent || '').trim() : '';
+
+    let bodySource = '';
+    for (const child of Array.from(bubble.childNodes)) {
+      if (child === metaEl) continue;
+      bodySource += child.textContent || '';
+    }
+
+    const cleanedBody = extractCleanMessageText(bodySource);
+    if (cleanedBody && cleanedBody.trim() !== bodySource.trim()) {
+      for (const child of Array.from(bubble.childNodes)) {
+        if (child !== metaEl) {
+          child.remove();
+        }
+      }
+      const cleanSpan = document.createElement('div');
+      cleanSpan.className = 'pin-clean-msg-text';
+      cleanSpan.textContent = cleanedBody;
+      if (metaEl) {
+        bubble.insertBefore(cleanSpan, metaEl);
+      } else {
+        bubble.appendChild(cleanSpan);
+      }
+    }
+
+    return cleanedBody || (bubble.textContent || '').replace(metaText, '').trim();
+  }
+
+  syncInvitesVisibility(): void {
+    if (typeof document === 'undefined') return;
+    const listInvites = document.getElementById('list-invites');
+    const badgeInvites = document.getElementById('badge-invites');
+    if (!listInvites) return;
+
+    const badgeNum = badgeInvites ? Number((badgeInvites.textContent || '').trim()) : 0;
+    const hasPendingCards = listInvites.querySelectorAll('.list-card').length > 0;
+    const shouldShow = (!Number.isNaN(badgeNum) && badgeNum > 0) || hasPendingCards;
+
+    const container =
+      listInvites.closest<HTMLElement>('section, .card, .panel, .sidebar-section, [data-invites-box]') ||
+      listInvites.parentElement;
+
+    if (container && container !== document.body) {
+      container.classList.toggle('pin-invites-hidden', !shouldShow);
+    } else {
+      listInvites.classList.toggle('pin-invites-hidden', !shouldShow);
+    }
+  }
+
   installIncomingDomWatcher(): void {
     if (typeof document === 'undefined' || this.observer) return;
 
     const seedExisting = () => {
-      document
-        .querySelectorAll<HTMLElement>('.msg-bubble, [data-message-id]')
-        .forEach((el) => {
-          const key = el.getAttribute('data-message-id') || (el.textContent || '').trim();
-          if (key) this.seenMessageKeys.add(key);
-        });
+      this.syncInvitesVisibility();
+      document.querySelectorAll<HTMLElement>('.msg-bubble, [data-message-id]').forEach((el) => {
+        const cleanText = this.sanitizeBubbleNode(el);
+        const key = el.getAttribute('data-message-id') || cleanText;
+        if (key) this.seenMessageKeys.add(key);
+      });
     };
 
     seedExisting();
 
     this.observer = new MutationObserver((mutations) => {
+      this.syncInvitesVisibility();
+
       for (const mut of mutations) {
         mut.addedNodes.forEach((node) => {
           if (!(node instanceof HTMLElement)) return;
@@ -174,24 +259,24 @@ class SoundAndNotificationController {
             : Array.from(node.querySelectorAll<HTMLElement>('.msg-bubble, [data-message-id]'));
 
           for (const el of candidates) {
+            const cleanText = this.sanitizeBubbleNode(el);
             if (el.classList.contains('mine')) continue;
+            if (!cleanText) continue;
 
-            const text = (el.textContent || '').trim().replace(/\s+/g, ' ');
-            if (!text) continue;
-            const key = `${el.getAttribute('data-message-id') || ''}|${text}`;
+            const key = `${el.getAttribute('data-message-id') || ''}|${cleanText}`;
             if (this.seenMessageKeys.has(key)) continue;
             this.seenMessageKeys.add(key);
 
             void this.notifyIncomingMessage({
               senderLabel: 'Nuevo mensaje',
-              previewText: text.slice(0, 120),
+              previewText: cleanText.slice(0, 120),
             });
           }
         });
       }
     });
 
-    this.observer.observe(document.body, { childList: true, subtree: true });
+    this.observer.observe(document.body, { childList: true, subtree: true, characterData: true });
   }
 }
 

@@ -1399,3 +1399,31 @@ dialog h3 {
   border-color: #0842a0 !important;
 }
 /* === PIN_HIDE_EMPTY_BLUE_BTNS_END === */
+/* === PIN_TITLE_INVITES_FIX_START === */
+#active-chat-title,
+#active-chat-title *,
+#chat-active header h1,
+#chat-active header h2,
+#chat-active header h3 {
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff !important;
+  opacity: 1 !important;
+}
+
+.pin-invites-hidden {
+  display: none !important;
+  visibility: hidden !important;
+  height: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+}
+
+.msg-bubble .pin-clean-msg-text {
+  display: block;
+  color: inherit !important;
+  -webkit-text-fill-color: inherit !important;
+  font-size: 0.96rem !important;
+  line-height: 1.4 !important;
+}
+/* === PIN_TITLE_INVITES_FIX_END === */
