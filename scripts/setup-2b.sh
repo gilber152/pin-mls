@@ -5,7 +5,6 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${ROOT_DIR}"
 
 # shellcheck disable=SC1091
-source "${HOME}/.cargo/env"
 
 echo "==> [1/4] Compilando y ejecutando tests Rust (OpenMLS 0.9 TreeKEM + PCS + Interop)..."
 cargo test -p pin-core -- --nocapture
