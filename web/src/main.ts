@@ -1533,7 +1533,7 @@ async function bootstrap(): Promise<void> {
         sigPkB64: vault.mlsSigPkB64,
       });
       vault.mlsStorageJson = rtInit.storageJson;
-      setGlobalStatus(`Sesión OpenMLS RFC 9420 recuperada para PIN ${formatPin(vault.pin)}.`);
+      setGlobalStatus('');
     } catch (err) {
       setGlobalStatus(`Error cargando estado OpenMLS local: ${(err as Error).message}`);
       return;

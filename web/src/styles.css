@@ -1586,3 +1586,13 @@ dialog h3 {
   margin-left: 10px;
 }
 /* === PIN_LOGOUT_DELETE_STYLE_END === */
+/* === PIN_HIDE_EMPTY_STATUS_START === */
+#global-status:empty {
+  display: none !important;
+  height: 0 !important;
+  min-height: 0 !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  border: 0 !important;
+}
+/* === PIN_HIDE_EMPTY_STATUS_END === */
