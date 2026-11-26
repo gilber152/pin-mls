@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PIN-MLS · Chat Cifrado E2EE</title>
+    <link rel="stylesheet" href="/src/styles.css" />
+  </head>
+  <body>
+    <div id="app">
+      <!-- VISTA 1: ONBOARDING -->
+      <section id="view-onboarding" class="onboarding-card">
+        <div class="brand-badge">PIN-MLS · E2EE</div>
+        <h1>Chat cifrado por PIN</h1>
+        <p class="muted">
+          Sin teléfono, sin correo y sin historial en el servidor. Tus claves se generan dentro de un
+          Web Worker en Rust/WebAssembly y tus mensajes se cifran extremo a extremo antes de salir
+          del navegador.
+        </p>
+
+        <div class="onboarding-actions">
+          <button id="btn-create-pin" class="btn-primary">Crear nuevo PIN</button>
+          <button id="btn-onboarding-link" class="btn-secondary">
+            Vincular a un PIN existente (LinkQr)
+          </button>
+          <button id="btn-onboarding-restore" class="btn-ghost">
+            Restaurar desde Safe Backup
+          </button>
+        </div>
+
+        <p id="onboarding-status" class="status-line"></p>
+      </section>
+
+      <!-- VISTA 2: MESSENGER -->
+      <section id="view-chat" class="chat-shell hidden">
+        <header class="topbar">
+          <div class="topbar-left">
+            <span class="brand-mini">PIN-MLS</span>
+            <button id="btn-copy-pin" class="pin-pill" title="Clic para copiar tu PIN">
+              PIN: <strong id="my-pin-label">----</strong>
+            </button>
+            <span id="ws-badge" class="ws-badge offline">Desconectado</span>
+          </div>
+          <div class="topbar-actions">
+            <button id="btn-sync-now" class="btn-ghost">Sincronizar</button>
+            <button id="btn-open-devices" class="btn-secondary">Dispositivos</button>
+            <button id="btn-open-safe" class="btn-secondary">Safe Backup</button>
+            <button id="btn-wipe-vault" class="btn-danger-ghost">Salir / Borrar bóveda</button>
+          </div>
+        </header>
+
+        <!-- Banner temporal de 12 palabras recién generadas -->
+        <div id="mnemonic-banner" class="mnemonic-banner hidden">
+          <div>
+            <strong>Guarda tus 12 palabras de recuperación (no se almacenan en el navegador):</strong>
+            <code id="mnemonic-words-text"></code>
+          </div>
+          <button id="btn-dismiss-mnemonic" class="btn-secondary">Ya las guardé</button>
+        </div>
+
+        <div id="global-status" class="global-status">Listo.</div>
+
+        <div class="workspace">
+          <!-- COLUMNA IZQUIERDA: INVITAR, SOLICITUDES Y CHATS -->
+          <aside class="sidebar">
+            <div class="panel">
+              <h3>Invitar por PIN</h3>
+              <form id="form-invite" class="inline-form">
+                <input
+                  id="input-invite-pin"
+                  type="text"
+                  maxlength="9"
+                  placeholder="Ej: 7F3A-9C1B"
+                  autocomplete="off"
+                  required
+                />
+                <button id="btn-send-invite" type="submit" class="btn-primary">Invitar</button>
+              </form>
+              <input
+                id="input-invite-note"
+                type="text"
+                maxlength="80"
+                placeholder="Mensaje breve opcional (cifrado)"
+                autocomplete="off"
+              />
+            </div>
+
+            <div class="panel">
+              <h3>Solicitudes entrantes <span id="badge-invites" class="count-pill">0</span></h3>
+              <ul id="list-invites" class="item-list"></ul>
+            </div>
+
+            <div class="panel panel-grow">
+              <h3>Conversaciones E2EE <span id="badge-chats" class="count-pill">0</span></h3>
+              <ul id="list-chats" class="item-list"></ul>
+            </div>
+          </aside>
+
+          <!-- COLUMNA DERECHA: CONVERSACIÓN ACTIVA -->
+          <main class="chat-pane">
+            <div id="chat-empty" class="chat-empty">
+              <p>Selecciona un chat o invita otro PIN desde el panel izquierdo.</p>
+              <p class="muted">
+                Tip: abre esta misma URL en una <strong>ventana de incógnito</strong> para crear un
+                segundo PIN o vincular un segundo dispositivo con <strong>LinkQr</strong>.
+              </p>
+            </div>
+
+            <div id="chat-active" class="chat-active hidden">
+              <div class="chat-header">
+                <div>
+                  <strong id="active-chat-title">PIN ----</strong>
+                  <span id="active-chat-meta" class="muted-small"></span>
+                </div>
+                <span class="e2ee-tag">OpenMLS RFC 9420 · TreeKEM</span>
+              </div>
+
+              <div id="messages-list" class="messages-list"></div>
+
+              <form id="form-send-msg" class="composer">
+                <input
+                  id="input-msg"
+                  type="text"
+                  placeholder="Escribe un mensaje cifrado..."
+                  autocomplete="off"
+                  required
+                />
+                <button id="btn-send-msg" type="submit" class="btn-primary">Enviar</button>
+              </form>
+            </div>
+          </main>
+        </div>
+      </section>
+
+      <!-- MODAL SAFE BACKUP -->
+      <dialog id="safe-dialog" class="modal-dialog">
+        <form method="dialog" class="modal-body">
+          <h3 id="safe-dialog-title">Safe Backup cifrado</h3>
+          <p class="muted-small">
+            Tus 12 palabras BIP-39 se procesan solo en RAM dentro del Web Worker para derivar la
+            clave de cubetas de 16 KiB y se limpian al cerrar.
+          </p>
+          <label for="safe-mnemonic">
+            Frase semilla (<span id="safe-word-count">0</span>/12 palabras)
+          </label>
+          <textarea
+            id="safe-mnemonic"
+            rows="3"
+            autocomplete="off"
+            autocorrect="off"
+            autocapitalize="off"
+            spellcheck="false"
+            placeholder="palabra1 palabra2 ... palabra12"
+          ></textarea>
+          <p id="safe-status" class="status-line"></p>
+          <div class="modal-actions">
+            <button id="btn-safe-upload" type="button" class="btn-primary" disabled>
+              Respaldar ahora
+            </button>
+            <button id="btn-safe-restore" type="button" class="btn-secondary" disabled>
+              Restaurar / Fusionar
+            </button>
+            <button id="btn-safe-close" type="submit" class="btn-ghost">Cerrar</button>
+          </div>
+        </form>
+      </dialog>
+
+      <!-- MODAL DISPOSITIVO SECUNDARIO: ESPERANDO LINKQR -->
+      <dialog id="link-wait-dialog" class="modal-dialog">
+        <form method="dialog" class="modal-body">
+          <h3>Vincular este navegador (LinkQr)</h3>
+          <p class="muted-small">
+            Copia este código <code>pinapp://v1/link</code> y pégalo en tu dispositivo principal
+            dentro de <strong>Dispositivos → Vincular nuevo dispositivo</strong>. Este navegador
+            detectará la autorización automáticamente.
+          </p>
+          <label for="link-qr-output">Código de vinculación LinkQr</label>
+          <textarea
+            id="link-qr-output"
+            rows="4"
+            readonly
+            spellcheck="false"
+          ></textarea>
+          <div class="modal-actions">
+            <button id="btn-copy-link-qr" type="button" class="btn-primary">
+              Copiar código LinkQr
+            </button>
+            <button id="btn-link-wait-cancel" type="submit" class="btn-ghost">Cancelar</button>
+          </div>
+          <p id="link-wait-status" class="status-line"></p>
+        </form>
+      </dialog>
+
+      <!-- MODAL DISPOSITIVOS: LISTAR, VINCULAR Y REVOCAR -->
+      <dialog id="devices-dialog" class="modal-dialog modal-wide">
+        <form method="dialog" class="modal-body">
+          <div class="card-row">
+            <h3>Dispositivos de tu PIN</h3>
+            <button id="btn-refresh-devices" type="button" class="btn-ghost btn-sm">
+              Actualizar
+            </button>
+          </div>
+
+          <ul id="devices-list" class="item-list devices-scroll"></ul>
+
+          <div class="divider"></div>
+
+          <label for="devices-mnemonic">
+            Autorización con clave raíz — 12 palabras BIP-39 (<span id="devices-word-count">0</span>/12)
+          </label>
+          <textarea
+            id="devices-mnemonic"
+            rows="2"
+            autocomplete="off"
+            autocorrect="off"
+            autocapitalize="off"
+            spellcheck="false"
+            placeholder="Necesarias solo para firmar DeviceCert (vincular) o revmanifest-v1 (revocar)"
+          ></textarea>
+
+          <div class="subpanel">
+            <strong>Vincular nuevo dispositivo</strong>
+            <textarea
+              id="input-link-qr-uri"
+              rows="2"
+              autocomplete="off"
+              spellcheck="false"
+              placeholder="Pega aquí pinapp://v1/link?s=...&d=...&pk=...&ek=..."
+            ></textarea>
+            <div class="modal-actions">
+              <button id="btn-authorize-link" type="button" class="btn-primary" disabled>
+                Autorizar y vincular
+              </button>
+            </div>
+          </div>
+
+          <div id="revoke-confirm-box" class="subpanel subpanel-danger hidden">
+            <strong>Revocar dispositivo seleccionado (expulsión WS 4001)</strong>
+            <p id="revoke-target-label" class="muted-small"></p>
+            <div class="modal-actions">
+              <button id="btn-cancel-revoke" type="button" class="btn-ghost">Cancelar selección</button>
+              <button id="btn-confirm-revoke" type="button" class="btn-danger" disabled>
+                Firmar revmanifest-v1 y revocar
+              </button>
+            </div>
+          </div>
+
+          <p id="devices-status" class="status-line"></p>
+          <div class="modal-actions">
+            <button id="btn-devices-close" type="submit" class="btn-ghost">Cerrar</button>
+          </div>
+        </form>
+      </dialog>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

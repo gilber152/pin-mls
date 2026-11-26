@@ -1,0 +1,14 @@
+# Secretos locales y de producción
+backend/.env
+deploy/.env.prod
+deploy/secrets/
+android/app/google-services.json
+
+# Artefactos generados
+/target/
+/build/
+backend/dist/
+backend/node_modules/
+web/dist/
+web/node_modules/
+web/src/wasm/
