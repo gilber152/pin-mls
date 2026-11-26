@@ -34,7 +34,7 @@ function ensureWasm(): Promise<unknown> {
   if (!wasmReadyPromise) {
     wasmReadyPromise = init();
   }
-  return wasmReadyPromise;
+  return wasmReadyPromise!;
 }
 
 interface WorkerRequest {

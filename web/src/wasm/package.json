@@ -1,0 +1,15 @@
+{
+  "name": "pin-web-wasm",
+  "type": "module",
+  "version": "0.1.0",
+  "files": [
+    "pin_web_wasm_bg.wasm",
+    "pin_web_wasm.js",
+    "pin_web_wasm.d.ts"
+  ],
+  "main": "pin_web_wasm.js",
+  "types": "pin_web_wasm.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}
