@@ -188,6 +188,7 @@ export async function initStep1Enhancements(options?: {
   const setAliasForPin = async (pin: string, alias: string): Promise<void> => {
     const cleanPin = pin.trim().toUpperCase();
     aliases = await setPinAlias(cleanPin, alias);
+    window.dispatchEvent(new CustomEvent("pin:aliases-updated", { detail: { aliases } }));
     refreshSidebarBadges();
     options?.onAliasChanged?.(cleanPin, aliases[cleanPin] ?? '');
   };

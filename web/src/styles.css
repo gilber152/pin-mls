@@ -1490,6 +1490,10 @@ dialog h3 {
 }
 /* === PIN_PREVIEWS_ALIASES_CONTACTS_END === */
 /* === PIN_ALIAS_SUBCODE_START === */
+.pin-alias-pill {
+  display: none !important;
+}
+
 .pin-alias-wrap {
   display: inline-flex;
   align-items: baseline;
