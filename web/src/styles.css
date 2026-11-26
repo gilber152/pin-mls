@@ -1293,3 +1293,57 @@ dialog h3 {
   text-overflow: ellipsis;
 }
 /* === PIN_REAL_DOM_BW_END === */
+/* === PIN_BUBBLE_TEXT_FIX_START === */
+#messages-list .msg-bubble,
+.msg-bubble {
+  display: block !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  min-width: 60px;
+  font-size: 0.95rem !important;
+  line-height: 1.42 !important;
+  overflow-wrap: anywhere !important;
+  word-break: break-word !important;
+}
+
+.msg-bubble.theirs,
+.msg-bubble.theirs * {
+  background-color: transparent;
+  color: #0f172a !important;
+  -webkit-text-fill-color: #0f172a !important;
+  opacity: 1 !important;
+}
+
+.msg-bubble.theirs {
+  background-color: #ffffff !important;
+  border: 1px solid #cbd5e1 !important;
+}
+
+.msg-bubble.mine,
+.msg-bubble.mine * {
+  background-color: transparent;
+  color: #041e49 !important;
+  -webkit-text-fill-color: #041e49 !important;
+  opacity: 1 !important;
+}
+
+.msg-bubble.mine {
+  background-color: #dbeafe !important;
+  border: 1px solid #93c5fd !important;
+}
+
+.msg-bubble pre,
+.msg-bubble code {
+  white-space: pre-wrap !important;
+  word-break: break-word !important;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.88rem !important;
+}
+
+.msg-bubble .msg-meta {
+  font-size: 0.74rem !important;
+  color: #334155 !important;
+  -webkit-text-fill-color: #334155 !important;
+  margin-top: 4px;
+}
+/* === PIN_BUBBLE_TEXT_FIX_END === */
