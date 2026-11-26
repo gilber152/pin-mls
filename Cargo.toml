@@ -2,6 +2,7 @@
 members = [
     "crates/pin-core",
     "crates/pin-web-wasm",
+    "crates/pin-mobile-ffi",
 ]
 resolver = "2"
 
