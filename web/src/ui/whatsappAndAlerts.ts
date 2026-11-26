@@ -6,6 +6,7 @@ export interface IncomingMessageAlert {
 
 class SoundAndNotificationController {
   private audioCtx: AudioContext | null = null;
+  private userInteracted = false;
   private soundEnabled = true;
   private desktopNotifEnabled = true;
   private seenMessageKeys = new Set<string>();
@@ -13,26 +14,32 @@ class SoundAndNotificationController {
 
   constructor() {
     if (typeof window !== 'undefined') {
-      const unlock = () => {
-        this.ensureAudioContext();
-        if (this.audioCtx && this.audioCtx.state === 'suspended') {
-          this.audioCtx.resume().catch(() => {});
+      const onGesture = () => {
+        this.userInteracted = true;
+        const ctx = this.getExistingContext();
+        if (ctx && ctx.state === 'suspended') {
+          ctx.resume().catch(() => {});
         }
       };
-      window.addEventListener('pointerdown', unlock, { once: true });
-      window.addEventListener('keydown', unlock, { once: true });
+      window.addEventListener('pointerdown', onGesture, { passive: true });
+      window.addEventListener('keydown', onGesture, { passive: true });
     }
   }
 
-  private ensureAudioContext(): AudioContext | null {
-    if (typeof window === 'undefined') return null;
+  private getExistingContext(): AudioContext | null {
+    return this.audioCtx;
+  }
+
+  private ensureContextAfterGesture(): AudioContext | null {
+    if (typeof window === 'undefined' || !this.userInteracted) return null;
+    if (this.audioCtx) return this.audioCtx;
+
     const Ctx =
       window.AudioContext ||
       (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
     if (!Ctx) return null;
-    if (!this.audioCtx) {
-      this.audioCtx = new Ctx();
-    }
+
+    this.audioCtx = new Ctx();
     return this.audioCtx;
   }
 
@@ -57,7 +64,7 @@ class SoundAndNotificationController {
 
   async playMessageTone(): Promise<void> {
     if (!this.soundEnabled) return;
-    const ctx = this.ensureAudioContext();
+    const ctx = this.ensureContextAfterGesture();
     if (!ctx) return;
 
     try {
@@ -85,7 +92,7 @@ class SoundAndNotificationController {
         osc.stop(now + n.start + n.duration + 0.02);
       }
     } catch {
-      // Ignorado si el navegador bloquea audio antes de interacción
+      // Ignorado si el navegador bloquea audio
     }
   }
 
@@ -169,7 +176,9 @@ class SoundAndNotificationController {
 
           const candidates = node.matches('.message, .msg-item, .chat-message, [data-message-id]')
             ? [node]
-            : Array.from(node.querySelectorAll<HTMLElement>('.message, .msg-item, .chat-message, [data-message-id]'));
+            : Array.from(
+                node.querySelectorAll<HTMLElement>('.message, .msg-item, .chat-message, [data-message-id]')
+              );
 
           for (const el of candidates) {
             const isOutgoing =
@@ -205,11 +214,4 @@ export const waAlerts = new SoundAndNotificationController();
 export function applyWhatsAppLayoutClasses(): void {
   if (typeof document === 'undefined') return;
   document.body.classList.add('wa-theme-shell');
-
-  const appRoot =
-    document.querySelector<HTMLElement>('#app, main, .app-shell, .chat-app') ||
-    document.body.firstElementChild;
-  if (appRoot instanceof HTMLElement) {
-    appRoot.classList.add('wa-layout-grid');
-  }
 }
