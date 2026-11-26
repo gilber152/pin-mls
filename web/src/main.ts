@@ -1,6 +1,6 @@
 import { applyWhatsAppLayoutClasses, waAlerts } from './ui/whatsappAndAlerts.js';
 import type { VaultGroup, VaultState } from './types.js';
-import { loadVault, saveVault, wipeVault } from './storage/vaultDb.js';
+import { loadVault, saveVault, wipeVault, setPinAlias } from './storage/vaultDb.js';
 import { CryptoWorkerClient, type StartedLinkSessionDto } from './worker/workerClient.js';
 import {
   API_BASE,
@@ -52,6 +52,9 @@ const btnSyncNow = document.getElementById('btn-sync-now') as HTMLButtonElement;
 const btnOpenDevices = document.getElementById('btn-open-devices') as HTMLButtonElement;
 const btnOpenSafe = document.getElementById('btn-open-safe') as HTMLButtonElement;
 const btnWipeVault = document.getElementById('btn-wipe-vault') as HTMLButtonElement;
+const btnLogoutSession = document.getElementById('btn-logout-session') as HTMLButtonElement | null;
+const btnResumeSession = document.getElementById('btn-resume-session') as HTMLButtonElement | null;
+const PIN_MANUAL_LOGOUT_KEY = 'pin_mls_manual_logout_v1';
 const globalStatus = document.getElementById('global-status') as HTMLDivElement;
 
 const mnemonicBanner = document.getElementById('mnemonic-banner') as HTMLDivElement;
@@ -212,6 +215,7 @@ function renderAll(): void {
     for (const grp of groups) {
       const li = document.createElement('li');
       li.className = `list-card clickable ${grp.groupIdB64 === activeGroupIdB64 ? 'active' : ''}`;
+      li.dataset.groupId = grp.groupIdB64;
       li.onclick = () => {
         activeGroupIdB64 = grp.groupIdB64;
         renderAll();
@@ -273,6 +277,8 @@ function renderAll(): void {
 // ============================================================================
 
 async function createNewIdentity(): Promise<void> {
+  localStorage.removeItem(PIN_MANUAL_LOGOUT_KEY);
+  if (btnResumeSession) btnResumeSession.hidden = true;
   btnCreatePin.disabled = true;
   btnOnboardingLink.disabled = true;
   btnOnboardingRestore.disabled = true;
@@ -1383,8 +1389,84 @@ btnWipeVault.addEventListener('click', async () => {
   vault = null;
   activeGroupIdB64 = null;
   showOnboardingView();
+  localStorage.removeItem(PIN_MANUAL_LOGOUT_KEY);
+  if (btnResumeSession) btnResumeSession.hidden = true;
   onboardingStatus.textContent = 'Bóveda local borrada.';
 });
+
+/* === PIN_LOGOUT_AND_DELETE_CONTACT_START === */
+btnLogoutSession?.addEventListener('click', () => {
+  const ok = window.confirm('¿Salir de la sesión actual? Tu bóveda local y tus chats seguirán guardados en este dispositivo.');
+  if (!ok) return;
+  localStorage.setItem(PIN_MANUAL_LOGOUT_KEY, '1');
+  ws?.close();
+  ws = null;
+  api.clearSession();
+  vault = null;
+  activeGroupIdB64 = null;
+  if (btnResumeSession) btnResumeSession.hidden = false;
+  showOnboardingView();
+  onboardingStatus.textContent = 'Sesión cerrada. Tu bóveda local sigue intacta; pulsa "Reanudar sesión guardada" para volver a entrar.';
+});
+
+btnResumeSession?.addEventListener('click', () => {
+  localStorage.removeItem(PIN_MANUAL_LOGOUT_KEY);
+  window.location.reload();
+});
+
+function groupMatchesPin(grp: unknown, compactPin: string): boolean {
+  if (!compactPin || !grp || typeof grp !== 'object') return false;
+  const rec = grp as Record<string, unknown>;
+  const safeCopy: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(rec)) {
+    if (k === 'messages') continue;
+    safeCopy[k] = v;
+  }
+  return JSON.stringify(safeCopy).toUpperCase().replace(/[^A-Z0-9]/g, '').includes(compactPin);
+}
+
+window.addEventListener('pin:delete-contact', (ev: Event) => {
+  const detail = (ev as CustomEvent<{ pin?: string; groupIdB64?: string }>).detail ?? {};
+  const rawPin = (detail.pin ?? '').trim().toUpperCase();
+  const compactPin = rawPin.replace(/[^A-Z0-9]/g, '');
+  const groupIdB64 = (detail.groupIdB64 ?? '').trim();
+
+  void (async () => {
+    const removedIds: string[] = [];
+    if (vault) {
+    for (const [gid, grp] of Object.entries(vault.groups)) {
+      const matchId = Boolean(groupIdB64 && gid === groupIdB64);
+      const matchPin = Boolean(compactPin && groupMatchesPin(grp, compactPin));
+      if (matchId || matchPin) {
+        delete vault.groups[gid];
+        removedIds.push(gid);
+      }
+    }
+      if (removedIds.length > 0) {
+        if (activeGroupIdB64 && removedIds.includes(activeGroupIdB64)) {
+          activeGroupIdB64 = null;
+          chatActive.hidden = true;
+          messagesList.innerHTML = '';
+        }
+        await saveVault(vault);
+      }
+    }
+
+    if (rawPin) {
+      const updatedAliases = await setPinAlias(rawPin, '');
+      window.dispatchEvent(new CustomEvent('pin:aliases-updated', { detail: { aliases: updatedAliases } }));
+    }
+
+  renderAll();
+  renderAll();
+    if (globalStatus) {
+      globalStatus.textContent = rawPin
+        ? `Contacto ${rawPin} eliminado de este dispositivo.`
+        : 'Contacto eliminado de este dispositivo.';
+    }
+  })();
+});
+/* === PIN_LOGOUT_AND_DELETE_CONTACT_END === */
 
 formInvite.addEventListener('submit', (e) => {
   e.preventDefault();
@@ -1404,6 +1486,12 @@ formSendMsg.addEventListener('submit', async (e) => {
 
 async function bootstrap(): Promise<void> {
   const loaded = await loadVault();
+  if (loaded && localStorage.getItem(PIN_MANUAL_LOGOUT_KEY) === '1') {
+    if (btnResumeSession) btnResumeSession.hidden = false;
+    showOnboardingView();
+    onboardingStatus.textContent = 'Sesión cerrada manualmente. Tu bóveda local sigue guardada; pulsa "Reanudar sesión guardada" para volver a entrar.';
+    return;
+  }
   if (!loaded) {
     showOnboardingView();
     return;

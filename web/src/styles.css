@@ -1525,3 +1525,64 @@ dialog h3 {
   opacity: 0.9 !important;
 }
 /* === PIN_ALIAS_SUBCODE_END === */
+/* === PIN_LOGOUT_DELETE_STYLE_START === */
+#btn-wipe-vault,
+#view-chat > header #btn-wipe-vault,
+#view-chat .topbar #btn-wipe-vault {
+  background: #dc2626 !important;
+  background-color: #dc2626 !important;
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff !important;
+  border: 1px solid #b91c1c !important;
+}
+
+#btn-wipe-vault:hover,
+#view-chat > header #btn-wipe-vault:hover,
+#view-chat .topbar #btn-wipe-vault:hover {
+  background: #b91c1c !important;
+  background-color: #b91c1c !important;
+  border-color: #991b1b !important;
+}
+
+#btn-logout-session {
+  background: #0b57d0 !important;
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff !important;
+  border: 1px solid #0b57d0 !important;
+}
+
+#btn-logout-session:hover {
+  background: #0842a0 !important;
+}
+
+.pin-delete-contact-btn {
+  background: #fee2e2 !important;
+  color: #991b1b !important;
+  -webkit-text-fill-color: #991b1b !important;
+  border: 1px solid #fca5a5 !important;
+  border-radius: 6px;
+  padding: 2px 8px;
+  font-size: 0.76rem;
+  font-weight: 600;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.pin-delete-contact-btn:hover {
+  background: #dc2626 !important;
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff !important;
+  border-color: #b91c1c !important;
+}
+
+.pin-contacts-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+#btn-delete-active-contact {
+  margin-left: 10px;
+}
+/* === PIN_LOGOUT_DELETE_STYLE_END === */

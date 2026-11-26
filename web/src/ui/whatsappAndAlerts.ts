@@ -88,9 +88,7 @@ class SoundAndNotificationController {
   private desktopNotifEnabled = true;
   private seenMessageKeys = new Set<string>();
   private observer: MutationObserver | null = null;
-  /** Mapa indexado por PIN canónico (ej. RNCG-BWV0) -> alias */
   private aliasesByCanonical: Record<string, string> = {};
-  /** Mapa auxiliar indexado por PIN compacto (ej. RNCGBWV0) -> alias */
   private aliasesByCompact: Record<string, string> = {};
   private syncingUi = false;
 
@@ -149,6 +147,22 @@ class SoundAndNotificationController {
     const canonical = formatPinCanonical(pin);
     const compact = normalizePinCompact(pin);
     return this.aliasesByCanonical[canonical] ?? this.aliasesByCompact[compact];
+  }
+
+  requestDeleteContact(pin: string, groupIdB64 = ''): void {
+    const canonical = pin ? formatPinCanonical(pin) : '';
+    const alias = canonical ? this.getAliasForPin(canonical) : undefined;
+    const displayLabel = alias && canonical ? `${alias} (${canonical})` : canonical || 'este contacto';
+    const confirmed = window.confirm(
+      `¿Eliminar a ${displayLabel} y su conversación local de este dispositivo?`
+    );
+    if (!confirmed) return;
+
+    window.dispatchEvent(
+      new CustomEvent('pin:delete-contact', {
+        detail: { pin: canonical, groupIdB64 },
+      })
+    );
   }
 
   replacePinsWithAliasesInText(text: string): string {
@@ -371,7 +385,10 @@ class SoundAndNotificationController {
     }
 
     const suffix = original
-      .replace(new RegExp(`\\b${escapeRegexLiteral(cleanAlias)}\\s*\\(${escapeRegexLiteral(rawMatchedPin)}\\)`, 'i'), '')
+      .replace(
+        new RegExp(`\\b${escapeRegexLiteral(cleanAlias)}\\s*\\(${escapeRegexLiteral(rawMatchedPin)}\\)`, 'i'),
+        ''
+      )
       .replace(new RegExp(`\\b(?:PIN\\s*)?${escapeRegexLiteral(rawMatchedPin)}\\b`, 'i'), '')
       .trim();
 
@@ -390,6 +407,56 @@ class SoundAndNotificationController {
     wrap.append(nameEl, pinEl);
     el.appendChild(wrap);
     el.dataset.pinRenderedAlias = cleanAlias;
+  }
+
+  private ensureCardDeleteButton(card: HTMLElement): void {
+    if (card.querySelector('.pin-delete-contact-btn')) return;
+    const text = (card.textContent || '').trim();
+    const matchedPin = text.toUpperCase().match(SINGLE_PIN_RE)?.[0] ?? '';
+    const groupIdB64 = card.dataset.groupId ?? '';
+    if (!matchedPin && !groupIdB64) return;
+
+    const delBtn = document.createElement('button');
+    delBtn.type = 'button';
+    delBtn.className = 'pin-delete-contact-btn';
+    delBtn.textContent = 'Eliminar';
+    delBtn.title = 'Eliminar contacto y chat local';
+    delBtn.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      ev.preventDefault();
+      this.requestDeleteContact(matchedPin, groupIdB64);
+    });
+
+    const row = card.querySelector<HTMLElement>('.card-row');
+    if (row) {
+      row.appendChild(delBtn);
+    } else {
+      card.appendChild(delBtn);
+    }
+  }
+
+  private ensureActiveChatDeleteButton(): void {
+    const activeTitle = document.getElementById('active-chat-title');
+    if (!activeTitle || !activeTitle.parentElement) return;
+    let btn = document.getElementById('btn-delete-active-contact') as HTMLButtonElement | null;
+    if (!btn) {
+      btn = document.createElement('button');
+      btn.id = 'btn-delete-active-contact';
+      btn.type = 'button';
+      btn.className = 'pin-delete-contact-btn';
+      btn.textContent = 'Eliminar contacto';
+      btn.addEventListener('click', () => {
+        const titleEl = document.getElementById('active-chat-title');
+        const raw = (titleEl?.dataset.pinOriginal || titleEl?.textContent || '').toUpperCase();
+        const pin = raw.match(SINGLE_PIN_RE)?.[0] ?? '';
+        const activeCard = document.querySelector<HTMLElement>('#list-chats .list-card.active');
+        const groupIdB64 = activeCard?.dataset.groupId ?? '';
+        if (pin || groupIdB64) {
+          this.requestDeleteContact(pin, groupIdB64);
+        }
+      });
+      activeTitle.insertAdjacentElement('afterend', btn);
+    }
   }
 
   private sanitizeChatListPreviews(): void {
@@ -414,11 +481,14 @@ class SoundAndNotificationController {
       if (titleEl) {
         this.renderAliasElement(titleEl);
       }
+
+      this.ensureCardDeleteButton(card);
     });
 
     const activeTitle = document.getElementById('active-chat-title');
     if (activeTitle) {
       this.renderAliasElement(activeTitle);
+      this.ensureActiveChatDeleteButton();
     }
   }
 
@@ -444,9 +514,9 @@ class SoundAndNotificationController {
     }
   }
 
-  private collectSavedContacts(): Array<{ pin: string; element: HTMLElement }> {
+  private collectSavedContacts(): Array<{ pin: string; groupIdB64: string; element: HTMLElement }> {
     if (typeof document === 'undefined') return [];
-    const contacts: Array<{ pin: string; element: HTMLElement }> = [];
+    const contacts: Array<{ pin: string; groupIdB64: string; element: HTMLElement }> = [];
     const seenPins = new Set<string>();
 
     document.querySelectorAll<HTMLElement>('#list-chats .list-card').forEach((card) => {
@@ -457,13 +527,13 @@ class SoundAndNotificationController {
       const pin = formatPinCanonical(firstPin);
       if (seenPins.has(pin)) return;
       seenPins.add(pin);
-      contacts.push({ pin, element: card });
+      contacts.push({ pin, groupIdB64: card.dataset.groupId ?? '', element: card });
     });
 
     for (const pin of Object.keys(this.aliasesByCanonical)) {
       if (!seenPins.has(pin)) {
         seenPins.add(pin);
-        contacts.push({ pin, element: document.createElement('div') });
+        contacts.push({ pin, groupIdB64: '', element: document.createElement('div') });
       }
     }
 
@@ -546,6 +616,9 @@ class SoundAndNotificationController {
           nameSpan.textContent = item.pin;
         }
 
+        const actionsWrap = document.createElement('div');
+        actionsWrap.className = 'pin-contacts-actions';
+
         const openBtn = document.createElement('button');
         openBtn.type = 'button';
         openBtn.className = 'btn-primary';
@@ -566,7 +639,17 @@ class SoundAndNotificationController {
           popover.remove();
         });
 
-        row.append(nameSpan, openBtn);
+        const delBtn = document.createElement('button');
+        delBtn.type = 'button';
+        delBtn.className = 'pin-delete-contact-btn';
+        delBtn.textContent = 'Eliminar';
+        delBtn.addEventListener('click', () => {
+          this.requestDeleteContact(item.pin, item.groupIdB64);
+          window.setTimeout(() => renderList(searchInput.value), 250);
+        });
+
+        actionsWrap.append(openBtn, delBtn);
+        row.append(nameSpan, actionsWrap);
         resultsBox.appendChild(row);
       }
     };
