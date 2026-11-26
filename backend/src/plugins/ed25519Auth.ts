@@ -9,8 +9,8 @@ import './authTypes.js';
 const UUID_V4_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const PIN_CROCKFORD_RE = /^[0-9A-HJKMNP-TV-Z]{8}$/;
 
-const MAX_CLOCK_SKEW_SEC = 60;
-const NONCE_REPLAY_TTL_SEC = 180;
+const MAX_CLOCK_SKEW_SEC = 300;
+const NONCE_REPLAY_TTL_SEC = 360;
 const DEVICE_PK_CACHE_TTL_SEC = 60;
 
 interface CachedDeviceKey {

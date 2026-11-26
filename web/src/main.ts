@@ -9,6 +9,12 @@ import {
   type SyncResponse,
 } from './net/api.js';
 
+import { initStep1Enhancements, type Step1Controller } from './ui/step1Enhancements.js';
+
+import { initStep2Enhancements, type Step2Controller } from './ui/step2Enhancements.js';
+
+import { initStep4GroupsAndPresence, type Step4Controller } from './ui/step4GroupsAndPresence.js';
+
 const worker = new CryptoWorkerClient();
 const api = new PinApiClient(worker);
 
@@ -1141,7 +1147,19 @@ async function sendMessage(text: string): Promise<void> {
     const sentAtMs = Date.now();
     const enc = await worker.mlsEncryptMessage(
       grp.groupIdB64,
-      JSON.stringify({ text: clean, sentAtMs }),
+      /* PIN-STEP2-STEP3-SEND-HOOK */(() => {
+      const w = window as unknown as {
+        __pinStep2?: { wrapOutgoingText?: (t: string) => string };
+        __pinStep3?: { getPendingAttachment?: () => unknown };
+      };
+      const wrappedText = w.__pinStep2?.wrapOutgoingText ? w.__pinStep2.wrapOutgoingText(clean) : clean;
+      const att = w.__pinStep3?.getPendingAttachment?.() ?? null;
+      return JSON.stringify({
+        text: wrappedText,
+        sentAtMs,
+        ...(att ? { attachment: att } : {}),
+      });
+    })(),
     );
     vault.mlsStorageJson = enc.storageJson;
     await saveVault(vault);
@@ -1175,6 +1193,7 @@ async function sendMessage(text: string): Promise<void> {
       sentAtMs,
       mine: true,
     });
+    /* PIN-STEP3-CLEAR-ATTACH */ (window as unknown as { __pinStep3?: { clearPendingAttachment?: () => void } }).__pinStep3?.clearPendingAttachment?.();
     grp.lastSeq = Math.max(grp.lastSeq, resp.groupSeq);
     await saveVault(vault);
     renderAll();
@@ -1437,3 +1456,35 @@ async function bootstrap(): Promise<void> {
 }
 
 void bootstrap();
+
+// PIN-MLS STEP 1 HOOK
+let __pinStep1Ctrl: Step1Controller | null = null;
+void initStep1Enhancements({
+  onAliasChanged: () => {
+    __pinStep1Ctrl?.refreshSidebarBadges();
+  },
+}).then((ctrl) => {
+  __pinStep1Ctrl = ctrl;
+  (window as unknown as { __pinStep1?: Step1Controller }).__pinStep1 = ctrl;
+  ctrl.refreshSidebarBadges();
+});
+
+// PIN-MLS STEP 2 HOOK
+let __pinStep2Ctrl: Step2Controller | null = null;
+void initStep2Enhancements().then((ctrl) => {
+  __pinStep2Ctrl = ctrl;
+  (window as unknown as { __pinStep2?: Step2Controller }).__pinStep2 = ctrl;
+});
+
+// PIN-MLS STEP 4 HOOK
+let __pinStep4Ctrl: Step4Controller | null = null;
+void initStep4GroupsAndPresence({
+  onInvitePin: async (pin, note) => {
+    if (typeof sendInvite === "function") {
+      await sendInvite(pin, note);
+    }
+  },
+}).then((ctrl) => {
+  __pinStep4Ctrl = ctrl;
+  (window as unknown as { __pinStep4?: Step4Controller }).__pinStep4 = ctrl;
+});

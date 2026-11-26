@@ -1,0 +1,95 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: pin-mls-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-pin_mls}
+      POSTGRES_USER: ${POSTGRES_USER:-pin_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Define POSTGRES_PASSWORD en .env.prod}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ../../backend/sql:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-pin_user} -d ${POSTGRES_DB:-pin_mls}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - pin_net
+
+  redis:
+    image: redis:7-alpine
+    container_name: pin-mls-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD:?Define REDIS_PASSWORD en .env.prod}"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - pin_net
+
+  api:
+    build:
+      context: ../..
+      dockerfile: deploy/render/Dockerfile.backend
+    container_name: pin-mls-api
+    restart: unless-stopped
+    env_file:
+      - .env.prod
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      HOST: 0.0.0.0
+      DATABASE_URL: postgresql://${POSTGRES_USER:-pin_user}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-pin_mls}
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - pin_net
+
+  web:
+    build:
+      context: ../..
+      dockerfile: deploy/vps/Dockerfile.web
+    container_name: pin-mls-web
+    restart: unless-stopped
+    networks:
+      - pin_net
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: pin-mls-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN:?Define APP_DOMAIN en .env.prod (ej. chat.tudominio.com)}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - api
+      - web
+    networks:
+      - pin_net
+
+volumes:
+  postgres_data:
+  redis_data:
+  caddy_data:
+  caddy_config:
+
+networks:
+  pin_net:
+    driver: bridge
