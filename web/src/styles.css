@@ -1011,29 +1011,29 @@ body.wa-theme-shell {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-/* === PIN_BLUE_WHITE_WA_START === */
+/* === PIN_HIGH_CONTRAST_BW_START === */
 :root {
-  --pin-bw-surface: #f0f6fc;
-  --pin-bw-header: #e6f0fa;
-  --pin-bw-card: #ffffff;
-  --pin-bw-canvas: #f4f8fc;
-  --pin-bw-bubble-in: #ffffff;
-  --pin-bw-bubble-out: #d3e3fd;
-  --pin-bw-primary: #0b57d0;
-  --pin-bw-primary-hover: #0842a0;
-  --pin-bw-ink: #0f172a;
-  --pin-bw-ink-out: #041e49;
-  --pin-bw-muted: #475569;
-  --pin-bw-line: #d6e4f0;
+  --hc-bg-page: #e8f0f8;
+  --hc-bg-surface: #ffffff;
+  --hc-bg-soft: #f1f6fc;
+  --hc-navy: #0f294a;
+  --hc-blue: #0b57d0;
+  --hc-blue-hover: #0842a0;
+  --hc-bubble-in: #ffffff;
+  --hc-bubble-out: #dbeafe;
+  --hc-text-main: #0f172a;
+  --hc-text-secondary: #334155;
+  --hc-text-on-dark: #ffffff;
+  --hc-border: #cbd5e1;
 }
 
 body.pin-wa-topbars {
-  background: var(--pin-bw-surface);
-  color: var(--pin-bw-ink);
+  background: var(--hc-bg-page);
+  color: var(--hc-text-main);
   font-family: "Segoe UI", system-ui, -apple-system, Roboto, sans-serif;
 }
 
-/* Barra superior de funciones en blanco y azul suave */
+/* Barra superior de funciones: azul marino con letras blancas bien legibles */
 .pin-topbar-strip,
 body.pin-wa-topbars header,
 body.pin-wa-topbars .topbar,
@@ -1043,46 +1043,158 @@ body.pin-wa-topbars .chat-header {
   align-items: center;
   justify-content: space-between;
   gap: 8px 12px;
-  background: linear-gradient(180deg, var(--pin-bw-card) 0%, var(--pin-bw-header) 100%);
-  color: var(--pin-bw-ink);
-  border-bottom: 1px solid var(--pin-bw-line);
-  padding: 8px 14px;
+  background: var(--hc-navy);
+  color: var(--hc-text-on-dark);
+  border-bottom: 2px solid var(--hc-blue);
+  padding: 10px 16px;
 }
 
-/* Botones principales en azul con blanco */
+.pin-topbar-strip *,
+body.pin-wa-topbars header *,
+body.pin-wa-topbars .topbar *,
+body.pin-wa-topbars .chat-header * {
+  color: var(--hc-text-on-dark);
+}
+
+.pin-topbar-strip input,
+body.pin-wa-topbars header input,
+body.pin-wa-topbars .topbar input {
+  background: #ffffff;
+  color: var(--hc-text-main);
+  border: 1px solid #93c5fd;
+}
+
+.pin-topbar-strip input::placeholder,
+body.pin-wa-topbars header input::placeholder {
+  color: #475569;
+}
+
+/* Paneles laterales, tarjetas e ítems de conversación: fondo blanco y texto oscuro nítido */
+body.pin-wa-topbars aside,
+body.pin-wa-topbars .sidebar,
+body.pin-wa-topbars .panel,
+body.pin-wa-topbars .card,
+body.pin-wa-topbars .chat-item,
+body.pin-wa-topbars .conversation-item {
+  background: var(--hc-bg-surface);
+  color: var(--hc-text-main);
+  border-color: var(--hc-border);
+}
+
+body.pin-wa-topbars aside h1,
+body.pin-wa-topbars aside h2,
+body.pin-wa-topbars aside h3,
+body.pin-wa-topbars aside p,
+body.pin-wa-topbars aside span,
+body.pin-wa-topbars aside label,
+body.pin-wa-topbars .sidebar h1,
+body.pin-wa-topbars .sidebar h2,
+body.pin-wa-topbars .sidebar h3,
+body.pin-wa-topbars .sidebar p,
+body.pin-wa-topbars .sidebar span,
+body.pin-wa-topbars .sidebar label,
+body.pin-wa-topbars .chat-item *,
+body.pin-wa-topbars .conversation-item * {
+  color: var(--hc-text-main);
+}
+
+body.pin-wa-topbars .chat-item small,
+body.pin-wa-topbars .conversation-item small,
+body.pin-wa-topbars .muted,
+body.pin-wa-topbars .hint {
+  color: var(--hc-text-secondary);
+}
+
+body.pin-wa-topbars .chat-item:hover,
+body.pin-wa-topbars .conversation-item:hover,
+body.pin-wa-topbars .chat-item.active,
+body.pin-wa-topbars .conversation-item.active {
+  background: #e0edff;
+  border-left: 3px solid var(--hc-blue);
+}
+
+/* Inputs, textareas y selects siempre claros con letra oscura */
+body.pin-wa-topbars input,
+body.pin-wa-topbars textarea,
+body.pin-wa-topbars select {
+  background: #ffffff;
+  color: var(--hc-text-main);
+  border: 1.5px solid #94a3b8;
+  border-radius: 8px;
+}
+
+body.pin-wa-topbars input::placeholder,
+body.pin-wa-topbars textarea::placeholder {
+  color: #64748b;
+}
+
+body.pin-wa-topbars input:focus,
+body.pin-wa-topbars textarea:focus,
+body.pin-wa-topbars select:focus {
+  outline: none;
+  border-color: var(--hc-blue);
+  box-shadow: 0 0 0 3px rgba(11, 87, 208, 0.16);
+}
+
+/* Botones con contraste alto */
+body.pin-wa-topbars button {
+  background: #f1f5f9;
+  color: var(--hc-text-main);
+  border: 1px solid #94a3b8;
+  font-weight: 600;
+}
+
+body.pin-wa-topbars button:hover {
+  background: #e2e8f0;
+}
+
 body.pin-wa-topbars button.primary,
 body.pin-wa-topbars .btn-primary,
 body.pin-wa-topbars [type="submit"] {
-  background: var(--pin-bw-primary);
+  background: var(--hc-blue);
   color: #ffffff;
-  border-color: var(--pin-bw-primary);
+  border-color: var(--hc-blue);
 }
 
 body.pin-wa-topbars button.primary:hover,
 body.pin-wa-topbars .btn-primary:hover,
 body.pin-wa-topbars [type="submit"]:hover {
-  background: var(--pin-bw-primary-hover);
-  border-color: var(--pin-bw-primary-hover);
+  background: var(--hc-blue-hover);
+  border-color: var(--hc-blue-hover);
 }
 
-/* Área de conversación y burbujas azul + blanco */
+/* Área de mensajes y burbujas con lectura clara */
 body.pin-wa-topbars .messages,
 body.pin-wa-topbars .message-list,
 body.pin-wa-topbars .chat-messages {
-  background-color: var(--pin-bw-canvas);
-  background-image: radial-gradient(rgba(11, 87, 208, 0.055) 1px, transparent 0);
+  background-color: var(--hc-bg-soft);
+  background-image: radial-gradient(rgba(15, 41, 74, 0.06) 1px, transparent 0);
   background-size: 20px 20px;
+  color: var(--hc-text-main);
+}
+
+body.pin-wa-topbars .messages > p,
+body.pin-wa-topbars .chat-messages > p,
+body.pin-wa-topbars .empty-state,
+body.pin-wa-topbars .empty-state * {
+  color: var(--hc-text-secondary);
 }
 
 body.pin-wa-topbars .message,
 body.pin-wa-topbars .msg-item,
 body.pin-wa-topbars .chat-message {
-  background: var(--pin-bw-bubble-in);
-  color: var(--pin-bw-ink);
-  border: 1px solid var(--pin-bw-line);
+  background: var(--hc-bubble-in);
+  color: var(--hc-text-main);
+  border: 1px solid var(--hc-border);
   border-radius: 10px;
   border-top-left-radius: 2px;
-  box-shadow: 0 1px 2px rgba(11, 87, 208, 0.06);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
+}
+
+body.pin-wa-topbars .message *,
+body.pin-wa-topbars .msg-item *,
+body.pin-wa-topbars .chat-message * {
+  color: var(--hc-text-main);
 }
 
 body.pin-wa-topbars .message.outgoing,
@@ -1092,28 +1204,53 @@ body.pin-wa-topbars .message.self,
 body.pin-wa-topbars .message.me,
 body.pin-wa-topbars .message.sent,
 body.pin-wa-topbars [data-outgoing="true"] {
-  background: var(--pin-bw-bubble-out);
-  color: var(--pin-bw-ink-out);
-  border: 1px solid #b8d2fb;
+  background: var(--hc-bubble-out);
+  color: #041e49;
+  border: 1px solid #93c5fd;
   border-radius: 10px;
   border-top-right-radius: 2px;
 }
 
-/* Modales seguros sin desborde ni bloqueo */
+body.pin-wa-topbars .message.outgoing *,
+body.pin-wa-topbars .msg-item.outgoing *,
+body.pin-wa-topbars .chat-message.outgoing *,
+body.pin-wa-topbars .message.self *,
+body.pin-wa-topbars .message.me *,
+body.pin-wa-topbars .message.sent *,
+body.pin-wa-topbars [data-outgoing="true"] * {
+  color: #041e49;
+}
+
+/* Modales siempre con fondo blanco y texto oscuro legible */
 dialog,
 .modal,
 [role="dialog"] {
-  background: var(--pin-bw-card);
-  color: var(--pin-bw-ink);
-  border: 1px solid var(--pin-bw-line);
+  background: #ffffff;
+  color: var(--hc-text-main);
+  border: 1.5px solid #94a3b8;
+  border-radius: 12px;
   max-width: min(94vw, 560px);
   max-height: 88vh;
   overflow-y: auto;
   z-index: 9500;
   box-sizing: border-box;
+  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.25);
 }
 
-/* Notificación emergente azul con blanco */
+dialog *,
+.modal *,
+[role="dialog"] * {
+  color: var(--hc-text-main);
+}
+
+dialog button.primary,
+.modal button.primary,
+[role="dialog"] button.primary {
+  background: var(--hc-blue);
+  color: #ffffff;
+}
+
+/* Notificación emergente de alto contraste */
 .pin-top-toast-container {
   position: fixed;
   top: 14px;
@@ -1127,12 +1264,12 @@ dialog,
 }
 
 .pin-top-toast {
-  background: var(--pin-bw-card);
-  border: 1px solid var(--pin-bw-line);
-  border-left: 4px solid var(--pin-bw-primary);
+  background: #ffffff;
+  border: 1px solid var(--hc-border);
+  border-left: 5px solid var(--hc-blue);
   border-radius: 10px;
   padding: 10px 14px;
-  box-shadow: 0 6px 20px rgba(11, 87, 208, 0.14);
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.18);
   transition: opacity 0.22s ease, transform 0.22s ease;
 }
 
@@ -1143,16 +1280,16 @@ dialog,
 
 .pin-top-toast-title {
   font-weight: 700;
-  font-size: 0.9rem;
-  color: var(--pin-bw-ink);
+  font-size: 0.92rem;
+  color: var(--hc-text-main);
   margin-bottom: 2px;
 }
 
 .pin-top-toast-body {
-  font-size: 0.84rem;
-  color: var(--pin-bw-muted);
+  font-size: 0.85rem;
+  color: var(--hc-text-secondary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-/* === PIN_BLUE_WHITE_WA_END === */
+/* === PIN_HIGH_CONTRAST_BW_END === */
