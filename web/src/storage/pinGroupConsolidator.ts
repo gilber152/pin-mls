@@ -1,4 +1,17 @@
-import { extractCleanMessageText } from '../ui/whatsappAndAlerts.js';
+function extractCleanMessageText(rawText: string): string {
+  const trimmed = rawText.trim();
+  if (!trimmed) return '';
+  try {
+    const parsed = JSON.parse(trimmed) as unknown;
+    if (parsed && typeof parsed === 'object' && 'text' in parsed) {
+      const val = (parsed as { text?: unknown }).text;
+      if (typeof val === 'string' && val.trim()) return val.trim();
+    }
+  } catch {
+    // Texto plano
+  }
+  return trimmed;
+}
 
 const PIN_HISTORY_STORAGE_KEY = 'pin_mls_pin_history_v1';
 const PIN_RE_GLOBAL = /\b[A-Z0-9]{4}-?[A-Z0-9]{4}\b/g;
