@@ -10,9 +10,27 @@ export interface IncomingMessageAlert {
   groupId?: string;
 }
 
+interface ReplyContext {
+  sender: string;
+  preview: string;
+}
+
+interface VoicePayload {
+  mime: string;
+  dataB64: string;
+  durationSec?: number;
+}
+
+interface ParsedPinEnvelope {
+  text: string;
+  replyTo?: ReplyContext;
+  voice?: VoicePayload;
+}
+
 const PIN_PATTERN = /\b[A-Z0-9]{4}-?[A-Z0-9]{4}\b/g;
 const SINGLE_PIN_RE = /\b[A-Z0-9]{4}-?[A-Z0-9]{4}\b/;
 const MOBILE_MEDIA_QUERY = '(max-width: 860px)';
+const MAX_VOICE_SECONDS = 35;
 
 type PatchedWindow = Window & {
   pinSetAlias?: (pin: string, alias: string) => Promise<void>;
@@ -35,6 +53,126 @@ function formatPinCanonical(pin: string): string {
   return pin.trim().toUpperCase();
 }
 
+function formatDurationMMSS(totalSeconds: number): string {
+  const sec = Math.max(0, Math.round(totalSeconds));
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
+
+function base64ToBlobUrl(dataB64: string, mime: string): string | null {
+  try {
+    const binary = window.atob(dataB64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    const blob = new Blob([bytes], { type: mime || 'audio/webm' });
+    return URL.createObjectURL(blob);
+  } catch {
+    return null;
+  }
+}
+
+function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const res = typeof reader.result === 'string' ? reader.result : '';
+      const commaIdx = res.indexOf(',');
+      if (commaIdx === -1) {
+        reject(new Error('No se pudo codificar el audio.'));
+        return;
+      }
+      resolve(res.slice(commaIdx + 1));
+    };
+    reader.onerror = () => reject(new Error('Error leyendo el audio grabado.'));
+    reader.readAsDataURL(blob);
+  });
+}
+
+function pickSupportedAudioMime(): string {
+  if (typeof MediaRecorder === 'undefined' || typeof MediaRecorder.isTypeSupported !== 'function') {
+    return '';
+  }
+  const candidates = [
+    'audio/webm;codecs=opus',
+    'audio/webm',
+    'audio/mp4',
+    'audio/ogg;codecs=opus',
+  ];
+  for (const mime of candidates) {
+    if (MediaRecorder.isTypeSupported(mime)) return mime;
+  }
+  return '';
+}
+
+function parsePinEnvelope(rawText: string): ParsedPinEnvelope | null {
+  const trimmed = rawText.trim();
+  if (!trimmed) return null;
+
+  const tryParseObj = (candidate: string): ParsedPinEnvelope | null => {
+    try {
+      const parsed = JSON.parse(candidate) as unknown;
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+      const rec = parsed as Record<string, unknown>;
+
+      let replyTo: ReplyContext | undefined;
+      if (rec['replyTo'] && typeof rec['replyTo'] === 'object' && !Array.isArray(rec['replyTo'])) {
+        const r = rec['replyTo'] as Record<string, unknown>;
+        const sender = typeof r['sender'] === 'string' ? r['sender'].trim() : '';
+        const preview = typeof r['preview'] === 'string' ? r['preview'].trim() : '';
+        if (preview) {
+          replyTo = { sender: sender || 'Mensaje', preview };
+        }
+      }
+
+      let voice: VoicePayload | undefined;
+      if (rec['voice'] && typeof rec['voice'] === 'object' && !Array.isArray(rec['voice'])) {
+        const v = rec['voice'] as Record<string, unknown>;
+        const dataB64 = typeof v['dataB64'] === 'string' ? v['dataB64'].trim() : '';
+        const mime = typeof v['mime'] === 'string' ? v['mime'].trim() : 'audio/webm';
+        const durationSec = typeof v['durationSec'] === 'number' ? v['durationSec'] : undefined;
+        if (dataB64) {
+          voice = {
+            mime: mime || 'audio/webm',
+            dataB64,
+            ...(durationSec !== undefined ? { durationSec } : {}),
+          };
+        }
+      }
+
+      const rawT = typeof rec['text'] === 'string' ? rec['text'] : '';
+      if (!rawT && !voice && !replyTo) return null;
+
+      const text =
+        rawT.trim() ||
+        (voice
+          ? `🎤 Nota de voz${voice.durationSec ? ` (${formatDurationMMSS(voice.durationSec)})` : ''}`
+          : '');
+
+      return {
+        text,
+        ...(replyTo ? { replyTo } : {}),
+        ...(voice ? { voice } : {}),
+      };
+    } catch {
+      return null;
+    }
+  };
+
+  const direct = tryParseObj(trimmed);
+  if (direct) return direct;
+
+  const jsonMatch = trimmed.match(/\{[\s\S]*"__pin_v"[\s\S]*\}/);
+  const matchedJson = jsonMatch?.[0];
+  if (matchedJson) {
+    return tryParseObj(matchedJson);
+  }
+
+  return null;
+}
+
 export function extractCleanMessageText(rawText: string): string {
   const trimmed = rawText.trim();
   if (!trimmed) return '';
@@ -43,23 +181,10 @@ export function extractCleanMessageText(rawText: string): string {
   const prefix = prefixMatch?.[1] ?? '';
   const body = prefix ? trimmed.slice(prefix.length).trim() : trimmed;
 
-  const tryParse = (candidate: string): string | null => {
-    try {
-      const parsed = JSON.parse(candidate) as unknown;
-      if (parsed && typeof parsed === 'object' && 'text' in parsed) {
-        const val = (parsed as { text?: unknown }).text;
-        if (typeof val === 'string' && val.trim().length > 0) {
-          return val;
-        }
-      }
-    } catch {
-      // No es JSON válido
-    }
-    return null;
-  };
-
-  const direct = tryParse(body);
-  if (direct !== null) return `${prefix}${direct}`;
+  const parsed = parsePinEnvelope(body);
+  if (parsed && parsed.text) {
+    return `${prefix}${parsed.text}`;
+  }
 
   const quotedTextMatch = body.match(/"text"\s*:\s*"((?:\\.|[^"\\])*)"/);
   const captured = quotedTextMatch?.[1];
@@ -70,13 +195,6 @@ export function extractCleanMessageText(rawText: string): string {
     } catch {
       return `${prefix}${captured}`;
     }
-  }
-
-  const jsonMatch = body.match(/\{[\s\S]*"__pin_v"[\s\S]*\}/);
-  const matchedJson = jsonMatch?.[0];
-  if (matchedJson) {
-    const extracted = tryParse(matchedJson);
-    if (extracted !== null) return `${prefix}${extracted}`;
   }
 
   return trimmed;
@@ -98,6 +216,19 @@ class SoundAndNotificationController {
   private seenChatPreviews = new Map<string, string>();
   private lastSoundPlayedAt = 0;
 
+  // Estado de swipe-to-reply
+  private activeReply: ReplyContext | null = null;
+  private swipeBound = false;
+
+  // Estado de notas de voz
+  private mediaRecorder: MediaRecorder | null = null;
+  private recordingStream: MediaStream | null = null;
+  private recordingChunks: Blob[] = [];
+  private recordingStartMs = 0;
+  private recordingTimerId: number | null = null;
+  private recordingCancelled = false;
+  private voiceBlobUrlCache = new Map<string, string>();
+
   constructor() {
     if (typeof window !== 'undefined') {
       const onGesture = () => {
@@ -111,6 +242,443 @@ class SoundAndNotificationController {
     }
     void this.refreshAliasesFromVault();
   }
+
+  // === RESPUESTA CITADA (SWIPE-TO-REPLY) ===
+
+  consumeReplyAndWrapText(rawText: string): string {
+    const trimmed = rawText.trim();
+    if (!trimmed) return rawText;
+    if (!this.activeReply) return rawText;
+
+    const replyTo = this.activeReply;
+    this.clearActiveReply();
+
+    if (trimmed.startsWith('{"__pin_v":2')) {
+      return trimmed;
+    }
+
+    return JSON.stringify({
+      __pin_v: 2,
+      kind: 'text',
+      text: trimmed,
+      replyTo,
+    });
+  }
+
+  private setActiveReply(reply: ReplyContext): void {
+    this.activeReply = reply;
+    this.renderReplyBanner();
+    const inputMsg = document.getElementById('input-msg') as HTMLInputElement | null;
+    if (inputMsg) inputMsg.focus();
+  }
+
+  private clearActiveReply(): void {
+    this.activeReply = null;
+    this.renderReplyBanner();
+  }
+
+  private renderReplyBanner(): void {
+    if (typeof document === 'undefined') return;
+    const form = document.getElementById('form-send-msg');
+    if (!form) return;
+
+    let banner = document.getElementById('pin-reply-banner');
+    if (!banner) {
+      banner = document.createElement('div');
+      banner.id = 'pin-reply-banner';
+      banner.className = 'pin-reply-banner';
+      banner.hidden = true;
+
+      const body = document.createElement('div');
+      body.className = 'pin-reply-banner-body';
+
+      const senderEl = document.createElement('div');
+      senderEl.className = 'pin-reply-banner-sender';
+      senderEl.id = 'pin-reply-banner-sender';
+
+      const previewEl = document.createElement('div');
+      previewEl.className = 'pin-reply-banner-preview';
+      previewEl.id = 'pin-reply-banner-preview';
+
+      body.append(senderEl, previewEl);
+
+      const closeBtn = document.createElement('button');
+      closeBtn.type = 'button';
+      closeBtn.className = 'pin-reply-banner-close';
+      closeBtn.textContent = '✕';
+      closeBtn.title = 'Cancelar respuesta';
+      closeBtn.addEventListener('click', () => this.clearActiveReply());
+
+      banner.append(body, closeBtn);
+      form.insertAdjacentElement('beforebegin', banner);
+    }
+
+    if (!this.activeReply) {
+      banner.hidden = true;
+      return;
+    }
+
+    const senderEl = document.getElementById('pin-reply-banner-sender');
+    const previewEl = document.getElementById('pin-reply-banner-preview');
+    if (senderEl) senderEl.textContent = `Respondiendo a ${this.activeReply.sender}`;
+    if (previewEl) previewEl.textContent = this.activeReply.preview;
+    banner.hidden = false;
+  }
+
+  private extractBubbleReplyContext(bubble: HTMLElement): ReplyContext | null {
+    const cleanText = (
+      bubble.dataset.pinCleanText ||
+      bubble.querySelector<HTMLElement>('.pin-clean-msg-text')?.textContent ||
+      ''
+    ).trim();
+
+    const preview =
+      cleanText ||
+      (bubble.querySelector('.pin-voice-player') ? '🎤 Nota de voz' : '') ||
+      extractCleanMessageText((bubble.textContent || '').trim());
+
+    if (!preview) return null;
+
+    let sender = 'Contacto';
+    if (bubble.classList.contains('mine')) {
+      sender = 'Tú';
+    } else {
+      const metaRaw = (bubble.querySelector('.msg-meta')?.textContent || '').trim();
+      const firstPart = metaRaw.split('·')[0]?.trim() || '';
+      if (firstPart) {
+        sender = this.replacePinsWithAliasesInText(firstPart);
+      } else {
+        const activeTitle = document.getElementById('active-chat-title');
+        sender =
+          activeTitle?.querySelector('.pin-alias-name')?.textContent?.trim() ||
+          activeTitle?.dataset.pinOriginal ||
+          'Contacto';
+      }
+    }
+
+    return {
+      sender,
+      preview: preview.slice(0, 140),
+    };
+  }
+
+  private bindSwipeToReply(): void {
+    if (typeof document === 'undefined' || this.swipeBound) return;
+    const list = document.getElementById('messages-list');
+    if (!list) return;
+    this.swipeBound = true;
+
+    let activeBubble: HTMLElement | null = null;
+    let pointerId: number | null = null;
+    let startX = 0;
+    let startY = 0;
+    let dragging = false;
+    let readyToReply = false;
+    let vibrated = false;
+
+    const resetBubble = () => {
+      if (!activeBubble) return;
+      const b = activeBubble;
+      b.classList.remove('pin-swipe-ready');
+      b.style.transition = 'transform 0.18s ease';
+      b.style.transform = 'translateX(0px)';
+      window.setTimeout(() => {
+        b.style.transition = '';
+        b.style.transform = '';
+      }, 200);
+      activeBubble = null;
+      pointerId = null;
+      dragging = false;
+      readyToReply = false;
+      vibrated = false;
+    };
+
+    list.addEventListener('pointerdown', (ev) => {
+      if (ev.button !== 0 && ev.pointerType === 'mouse') return;
+      const target = ev.target instanceof HTMLElement ? ev.target : null;
+      if (!target) return;
+      if (target.closest('audio, button, a, input, textarea')) return;
+
+      const bubble = target.closest<HTMLElement>('.msg-bubble');
+      if (!bubble) return;
+
+      activeBubble = bubble;
+      pointerId = ev.pointerId;
+      startX = ev.clientX;
+      startY = ev.clientY;
+      dragging = false;
+      readyToReply = false;
+      vibrated = false;
+    });
+
+    list.addEventListener('pointermove', (ev) => {
+      if (!activeBubble || ev.pointerId !== pointerId) return;
+      const dx = ev.clientX - startX;
+      const dy = ev.clientY - startY;
+
+      if (!dragging) {
+        // Ignorar si el usuario está haciendo scroll vertical o deslizando a la izquierda
+        if (Math.abs(dy) > 14 && Math.abs(dy) > Math.abs(dx)) {
+          resetBubble();
+          return;
+        }
+        if (dx > 12 && dx > Math.abs(dy) * 1.4) {
+          dragging = true;
+          activeBubble.style.transition = 'none';
+        } else {
+          return;
+        }
+      }
+
+      const clampedX = Math.max(0, Math.min(dx, 68));
+      activeBubble.style.transform = `translateX(${clampedX}px)`;
+      readyToReply = clampedX >= 48;
+      activeBubble.classList.toggle('pin-swipe-ready', readyToReply);
+
+      if (readyToReply && !vibrated) {
+        vibrated = true;
+        if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
+          navigator.vibrate(14);
+        }
+      }
+    });
+
+    const finishSwipe = (ev: PointerEvent) => {
+      if (!activeBubble || ev.pointerId !== pointerId) return;
+      const shouldTrigger = dragging && readyToReply;
+      const targetBubble = activeBubble;
+      resetBubble();
+
+      if (shouldTrigger) {
+        const ctx = this.extractBubbleReplyContext(targetBubble);
+        if (ctx) {
+          this.setActiveReply(ctx);
+        }
+      }
+    };
+
+    list.addEventListener('pointerup', finishSwipe);
+    list.addEventListener('pointercancel', finishSwipe);
+
+    window.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Escape' && this.activeReply) {
+        this.clearActiveReply();
+      }
+    });
+  }
+
+  // === NOTAS DE VOZ E2EE ===
+
+  private installVoiceControls(): void {
+    if (typeof document === 'undefined') return;
+    const form = document.getElementById('form-send-msg');
+    if (!form) return;
+
+    if (!document.getElementById('pin-voice-bar')) {
+      const bar = document.createElement('div');
+      bar.id = 'pin-voice-bar';
+      bar.className = 'pin-voice-bar';
+      bar.hidden = true;
+
+      const status = document.createElement('div');
+      status.className = 'pin-voice-status';
+
+      const dot = document.createElement('span');
+      dot.className = 'pin-voice-dot';
+
+      const timer = document.createElement('span');
+      timer.id = 'pin-voice-timer';
+      timer.textContent = 'Grabando 0:00';
+
+      status.append(dot, timer);
+
+      const actions = document.createElement('div');
+      actions.className = 'pin-voice-actions';
+
+      const cancelBtn = document.createElement('button');
+      cancelBtn.type = 'button';
+      cancelBtn.className = 'pin-voice-cancel-btn';
+      cancelBtn.textContent = 'Cancelar';
+      cancelBtn.addEventListener('click', () => this.stopVoiceRecording(true));
+
+      const sendBtn = document.createElement('button');
+      sendBtn.type = 'button';
+      sendBtn.className = 'pin-voice-send-btn';
+      sendBtn.textContent = 'Enviar nota';
+      sendBtn.addEventListener('click', () => this.stopVoiceRecording(false));
+
+      actions.append(cancelBtn, sendBtn);
+      bar.append(status, actions);
+      form.insertAdjacentElement('beforebegin', bar);
+    }
+
+    if (!document.getElementById('btn-voice-record')) {
+      const micBtn = document.createElement('button');
+      micBtn.id = 'btn-voice-record';
+      micBtn.type = 'button';
+      micBtn.textContent = '🎤';
+      micBtn.title = 'Grabar nota de voz cifrada';
+      micBtn.setAttribute('aria-label', 'Grabar nota de voz cifrada');
+      micBtn.addEventListener('click', () => {
+        if (this.mediaRecorder && this.mediaRecorder.state === 'recording') {
+          this.stopVoiceRecording(false);
+        } else {
+          void this.startVoiceRecording();
+        }
+      });
+
+      const submitBtn = form.querySelector<HTMLElement>('button[type="submit"]');
+      if (submitBtn) {
+        form.insertBefore(micBtn, submitBtn);
+      } else {
+        form.appendChild(micBtn);
+      }
+    }
+  }
+
+  private setVoiceUiRecording(isRecording: boolean): void {
+    const micBtn = document.getElementById('btn-voice-record');
+    const bar = document.getElementById('pin-voice-bar');
+    if (micBtn) {
+      micBtn.classList.toggle('recording', isRecording);
+      micBtn.title = isRecording ? 'Detener y enviar nota de voz' : 'Grabar nota de voz cifrada';
+    }
+    if (bar) {
+      bar.hidden = !isRecording;
+    }
+  }
+
+  private cleanupRecordingResources(): void {
+    if (this.recordingTimerId !== null) {
+      window.clearInterval(this.recordingTimerId);
+      this.recordingTimerId = null;
+    }
+    if (this.recordingStream) {
+      this.recordingStream.getTracks().forEach((t) => t.stop());
+      this.recordingStream = null;
+    }
+    this.mediaRecorder = null;
+    this.setVoiceUiRecording(false);
+  }
+
+  private async startVoiceRecording(): Promise<void> {
+    if (
+      typeof navigator === 'undefined' ||
+      !navigator.mediaDevices ||
+      typeof navigator.mediaDevices.getUserMedia !== 'function' ||
+      typeof MediaRecorder === 'undefined'
+    ) {
+      const status = document.getElementById('global-status');
+      if (status) {
+        status.textContent = 'Tu navegador no soporta grabación de notas de voz.';
+      }
+      return;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      this.recordingStream = stream;
+      this.recordingChunks = [];
+      this.recordingCancelled = false;
+      this.recordingStartMs = Date.now();
+
+      const mimeType = pickSupportedAudioMime();
+      const options: MediaRecorderOptions = {
+        audioBitsPerSecond: 16000,
+        ...(mimeType ? { mimeType } : {}),
+      };
+
+      const recorder = new MediaRecorder(stream, options);
+      this.mediaRecorder = recorder;
+
+      recorder.ondataavailable = (ev) => {
+        if (ev.data && ev.data.size > 0) {
+          this.recordingChunks.push(ev.data);
+        }
+      };
+
+      recorder.onstop = () => {
+        const wasCancelled = this.recordingCancelled;
+        const durationSec = Math.max(1, Math.round((Date.now() - this.recordingStartMs) / 1000));
+        const finalMime = recorder.mimeType || mimeType || 'audio/webm';
+        const chunks = [...this.recordingChunks];
+        this.recordingChunks = [];
+        this.cleanupRecordingResources();
+
+        if (wasCancelled || chunks.length === 0) return;
+
+        void (async () => {
+          try {
+            const blob = new Blob(chunks, { type: finalMime });
+            const dataB64 = await blobToBase64(blob);
+            const replyTo = this.activeReply;
+            if (replyTo) this.clearActiveReply();
+
+            const envelope = {
+              __pin_v: 2,
+              kind: 'text',
+              text: `🎤 Nota de voz (${formatDurationMMSS(durationSec)})`,
+              ...(replyTo ? { replyTo } : {}),
+              voice: {
+                mime: finalMime,
+                dataB64,
+                durationSec,
+              },
+            };
+
+            window.dispatchEvent(
+              new CustomEvent('pin:send-raw-payload', {
+                detail: { payload: JSON.stringify(envelope) },
+              })
+            );
+          } catch (err) {
+            const status = document.getElementById('global-status');
+            if (status) {
+              status.textContent = `Error procesando nota de voz: ${(err as Error).message}`;
+            }
+          }
+        })();
+      };
+
+      recorder.start();
+      this.setVoiceUiRecording(true);
+
+      const timerEl = document.getElementById('pin-voice-timer');
+      if (timerEl) timerEl.textContent = 'Grabando 0:00';
+
+      this.recordingTimerId = window.setInterval(() => {
+        const elapsed = Math.floor((Date.now() - this.recordingStartMs) / 1000);
+        const tEl = document.getElementById('pin-voice-timer');
+        if (tEl) {
+          tEl.textContent = `Grabando ${formatDurationMMSS(elapsed)} / ${formatDurationMMSS(MAX_VOICE_SECONDS)}`;
+        }
+        if (elapsed >= MAX_VOICE_SECONDS) {
+          this.stopVoiceRecording(false);
+        }
+      }, 250);
+    } catch {
+      this.cleanupRecordingResources();
+      const status = document.getElementById('global-status');
+      if (status) {
+        status.textContent = 'Permite el acceso al micrófono para enviar notas de voz.';
+      }
+    }
+  }
+
+  private stopVoiceRecording(cancel: boolean): void {
+    this.recordingCancelled = cancel;
+    if (this.mediaRecorder && this.mediaRecorder.state !== 'inactive') {
+      try {
+        this.mediaRecorder.stop();
+      } catch {
+        this.cleanupRecordingResources();
+      }
+    } else {
+      this.cleanupRecordingResources();
+    }
+  }
+
+  // === NOTIFICACIONES Y CONTROL DE CHAT ===
 
   private suppressNotificationsFor(ms = 900): void {
     const target = Date.now() + ms;
@@ -222,6 +790,7 @@ class SoundAndNotificationController {
       });
     } else {
       document.body.classList.remove('pin-mobile-chat-open');
+      this.clearActiveReply();
     }
     this.syncMobileMenuButtonLabel();
   }
@@ -434,15 +1003,17 @@ class SoundAndNotificationController {
             ) ??
               null);
 
-          // Silenciar alertas antes de que main.ts cargue el historial de ese contacto
           if (chatCard && !clickedDelete) {
             this.suppressNotificationsFor(900);
+            this.clearActiveReply();
             this.setMobileChatOpen(true);
             return;
           }
 
           if (target.closest('#btn-logout-session, #btn-wipe-vault')) {
             this.suppressNotificationsFor(1500);
+            this.clearActiveReply();
+            this.stopVoiceRecording(true);
             window.setTimeout(() => {
               document.body.classList.remove('pin-mobile-chat-open', 'pin-mobile-menu-open');
               this.syncMobileMenuButtonLabel();
@@ -466,6 +1037,7 @@ class SoundAndNotificationController {
 
       window.addEventListener('pin:delete-contact', () => {
         this.suppressNotificationsFor(1000);
+        this.clearActiveReply();
         this.setMobileChatOpen(false);
       });
 
@@ -709,6 +1281,17 @@ class SoundAndNotificationController {
     await this.playMessageTone();
   }
 
+  private getOrCreateVoiceUrl(voice: VoicePayload): string | null {
+    const cacheKey = `${voice.mime}|${voice.dataB64.length}|${voice.dataB64.slice(0, 40)}`;
+    const existing = this.voiceBlobUrlCache.get(cacheKey);
+    if (existing) return existing;
+    const url = base64ToBlobUrl(voice.dataB64, voice.mime);
+    if (url) {
+      this.voiceBlobUrlCache.set(cacheKey, url);
+    }
+    return url;
+  }
+
   private sanitizeBubbleNode(bubble: HTMLElement): string {
     const metaEl = bubble.querySelector<HTMLElement>('.msg-meta');
     if (metaEl && metaEl.textContent) {
@@ -717,12 +1300,82 @@ class SoundAndNotificationController {
         metaEl.textContent = updatedMeta;
       }
     }
-    const metaText = metaEl ? (metaEl.textContent || '').trim() : '';
+
+    // No recrear DOM de burbujas ricas ya renderizadas (evita cortar la reproducción de audio)
+    if (bubble.dataset.pinRichRendered === '1') {
+      return bubble.dataset.pinCleanText || '';
+    }
 
     let bodySource = '';
     for (const child of Array.from(bubble.childNodes)) {
       if (child === metaEl) continue;
       bodySource += child.textContent || '';
+    }
+
+    const parsed = parsePinEnvelope(bodySource);
+    if (parsed && (parsed.replyTo || parsed.voice)) {
+      for (const child of Array.from(bubble.childNodes)) {
+        if (child !== metaEl) {
+          child.remove();
+        }
+      }
+
+      const frag = document.createDocumentFragment();
+
+      if (parsed.replyTo) {
+        const quoteBox = document.createElement('div');
+        quoteBox.className = 'pin-reply-quote';
+
+        const qSender = document.createElement('div');
+        qSender.className = 'pin-reply-quote-sender';
+        qSender.textContent = this.replacePinsWithAliasesInText(parsed.replyTo.sender);
+
+        const qText = document.createElement('div');
+        qText.className = 'pin-reply-quote-text';
+        qText.textContent = this.replacePinsWithAliasesInText(parsed.replyTo.preview);
+
+        quoteBox.append(qSender, qText);
+        frag.appendChild(quoteBox);
+      }
+
+      if (parsed.voice) {
+        const playerWrap = document.createElement('div');
+        playerWrap.className = 'pin-voice-player';
+
+        const audio = document.createElement('audio');
+        audio.controls = true;
+        audio.preload = 'metadata';
+        const blobUrl = this.getOrCreateVoiceUrl(parsed.voice);
+        if (blobUrl) {
+          audio.src = blobUrl;
+        }
+        playerWrap.appendChild(audio);
+
+        if (parsed.voice.durationSec) {
+          const dur = document.createElement('div');
+          dur.className = 'pin-voice-duration';
+          dur.textContent = `Nota de voz · ${formatDurationMMSS(parsed.voice.durationSec)}`;
+          playerWrap.appendChild(dur);
+        }
+
+        frag.appendChild(playerWrap);
+      } else {
+        const cleanSpan = document.createElement('div');
+        cleanSpan.className = 'pin-clean-msg-text';
+        cleanSpan.textContent = this.replacePinsWithAliasesInText(parsed.text);
+        frag.appendChild(cleanSpan);
+      }
+
+      if (metaEl) {
+        bubble.insertBefore(frag, metaEl);
+      } else {
+        bubble.appendChild(frag);
+      }
+
+      const summaryText = this.replacePinsWithAliasesInText(parsed.text);
+      bubble.dataset.pinRichRendered = '1';
+      bubble.dataset.pinCleanText = summaryText;
+      return summaryText;
     }
 
     const cleanedBody = this.replacePinsWithAliasesInText(extractCleanMessageText(bodySource));
@@ -742,7 +1395,10 @@ class SoundAndNotificationController {
       }
     }
 
-    return cleanedBody || (bubble.textContent || '').replace(metaText, '').trim();
+    const metaText = metaEl ? (metaEl.textContent || '').trim() : '';
+    const finalClean = cleanedBody || (bubble.textContent || '').replace(metaText, '').trim();
+    bubble.dataset.pinCleanText = finalClean;
+    return finalClean;
   }
 
   private renderAliasElement(el: HTMLElement): void {
@@ -930,7 +1586,13 @@ class SoundAndNotificationController {
       });
 
     document.querySelectorAll<HTMLElement>('button').forEach((btn) => {
-      if (btn.id === 'pin-btn-edit-alias' || btn.id === 'btn-search-saved-contacts') return;
+      if (
+        btn.id === 'pin-btn-edit-alias' ||
+        btn.id === 'btn-search-saved-contacts' ||
+        btn.id === 'btn-voice-record'
+      ) {
+        return;
+      }
       const meta = [
         btn.id,
         btn.className,
@@ -1138,6 +1800,7 @@ class SoundAndNotificationController {
           const liveCard = this.findLiveChatCard(item.pin, item.groupIdB64);
           if (liveCard) {
             this.suppressNotificationsFor(900);
+            this.clearActiveReply();
             liveCard.click();
             this.setMobileChatOpen(true);
             liveCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -1212,6 +1875,9 @@ class SoundAndNotificationController {
       this.cleanEpochAndStatusLabels();
       this.hideDisabledControls();
       this.installContactsSearchButton();
+      this.bindSwipeToReply();
+      this.installVoiceControls();
+      this.renderReplyBanner();
       document.querySelectorAll<HTMLElement>('.msg-bubble').forEach((el) => {
         this.sanitizeBubbleNode(el);
       });
@@ -1266,6 +1932,7 @@ class SoundAndNotificationController {
       if (chatChanged) {
         this.lastActiveChatKey = currentChatKey;
         this.suppressNotificationsFor(700);
+        this.clearActiveReply();
       }
 
       const isSuppressed = chatChanged || Date.now() < this.suppressAlertsUntil;

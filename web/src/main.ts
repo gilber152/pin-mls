@@ -1508,7 +1508,8 @@ formSendMsg.addEventListener('submit', async (e) => {
   const txt = inputMsg.value;
   inputMsg.value = '';
   try {
-    await sendMessage(txt);
+    const payload = waAlerts.consumeReplyAndWrapText(txt);
+    await sendMessage(payload);
   } catch (err) {
     setGlobalStatus(`Error enviando mensaje: ${(err as Error).message}`);
   }
@@ -1626,4 +1627,16 @@ window.addEventListener('pin:groups-consolidated', (ev: Event) => {
   if (redirects && activeGroupIdB64 && redirects[activeGroupIdB64]) {
     activeGroupIdB64 = redirects[activeGroupIdB64] ?? activeGroupIdB64;
   }
+});
+
+window.addEventListener('pin:send-raw-payload', (ev: Event) => {
+  const payload = (ev as CustomEvent<{ payload?: string }>).detail?.payload ?? '';
+  if (!payload) return;
+  void (async () => {
+    try {
+      await sendMessage(payload);
+    } catch (err) {
+      setGlobalStatus(`Error enviando nota de voz: ${(err as Error).message}`);
+    }
+  })();
 });
