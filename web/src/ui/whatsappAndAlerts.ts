@@ -350,7 +350,14 @@ class SoundAndNotificationController {
       if (firstPart) {
         sender = this.replacePinsWithAliasesInText(firstPart);
       } else {
-        const activeTitle = document.getElementById('active-chat-title');
+        document.querySelectorAll<HTMLElement>('#list-invites .list-card').forEach((card) => {
+      const inviteTitle = card.querySelector<HTMLElement>('strong, b, h3, h4');
+      if (inviteTitle) {
+        this.renderAliasElement(inviteTitle);
+      }
+    });
+
+    const activeTitle = document.getElementById('active-chat-title');
         sender =
           activeTitle?.querySelector('.pin-alias-name')?.textContent?.trim() ||
           activeTitle?.dataset.pinOriginal ||
@@ -1986,6 +1993,10 @@ class SoundAndNotificationController {
     if (typeof window !== 'undefined') {
       const w = window as PatchedWindow;
       w.pinSetAlias = (pin: string, alias: string) => this.setPinAlias(pin, alias);
+
+      window.addEventListener('focus', () => {
+        void this.refreshAliasesFromVault();
+      });
 
       window.addEventListener('pin:aliases-updated', (ev: Event) => {
         this.suppressNotificationsFor(700);

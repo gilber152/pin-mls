@@ -98,6 +98,14 @@ export async function loadPinAliases(): Promise<PinAliasMap> {
 }
 
 export async function setPinAlias(pin: string, alias: string): Promise<PinAliasMap> {
+  const next = await setPinAliasRaw(pin, alias);
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('pin:aliases-updated', { detail: { aliases: next } }));
+  }
+  return next;
+}
+
+async function setPinAliasRaw(pin: string, alias: string): Promise<PinAliasMap> {
   const cleanPin = normalizePinKey(pin);
   const cleanAlias = alias.trim();
   const db = await openDb();

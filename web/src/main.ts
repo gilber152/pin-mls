@@ -1,7 +1,7 @@
 import { applyWhatsAppLayoutClasses, waAlerts } from './ui/whatsappAndAlerts.js';
 import type { VaultGroup, VaultState } from './types.js';
 import { loadVault, saveVault, wipeVault, setPinAlias } from './storage/vaultDb.js';
-import { archiveMessagesForPin } from './storage/pinGroupConsolidator.js';
+import { archiveMessagesForPin, consolidateVaultGroupsByPin } from './storage/pinGroupConsolidator.js';
 import { CryptoWorkerClient, type StartedLinkSessionDto } from './worker/workerClient.js';
 import {
   API_BASE,
@@ -225,6 +225,7 @@ function renderAll(): void {
     }
   }
 
+  /* PIN_CONSOLIDATE_BEFORE_RENDER */ consolidateVaultGroupsByPin(vault);
   const groups = Object.values(vault.groups).sort((a, b) => {
     const aTime = a.messages[a.messages.length - 1]?.sentAtMs ?? 0;
     const bTime = b.messages[b.messages.length - 1]?.sentAtMs ?? 0;
@@ -1471,8 +1472,9 @@ window.addEventListener('pin:delete-contact', (ev: Event) => {
       const matchId = Boolean(groupIdB64 && gid === groupIdB64);
       const matchPin = Boolean(compactPin && groupMatchesPin(grp, compactPin));
       if (matchId || matchPin) {
-        if (rawPin && Array.isArray((grp as { messages?: unknown[] }).messages)) {
-          archiveMessagesForPin(rawPin, (grp as { messages: unknown[] }).messages);
+        const pinToArchive = rawPin || (typeof grp.peerPin === 'string' ? grp.peerPin : '');
+        if (pinToArchive && Array.isArray(grp.messages)) {
+          archiveMessagesForPin(pinToArchive, grp.messages);
         }
         delete vault.groups[gid];
         removedIds.push(gid);
@@ -1488,10 +1490,7 @@ window.addEventListener('pin:delete-contact', (ev: Event) => {
       }
     }
 
-    if (rawPin) {
-      const updatedAliases = await setPinAlias(rawPin, '');
-      window.dispatchEvent(new CustomEvent('pin:aliases-updated', { detail: { aliases: updatedAliases } }));
-    }
+    // El alias local se conserva para reconocer al contacto si vuelve a conectarse el mismo PIN
 
   renderAll();
   renderAll();
@@ -1628,21 +1627,17 @@ void initStep4GroupsAndPresence({
   }
 })();
 
+let pinConsolidationRenderQueued = false;
 window.addEventListener('pin:groups-consolidated', (ev: Event) => {
   const redirects = (ev as CustomEvent<{ redirects?: Record<string, string> }>).detail?.redirects;
   if (redirects && activeGroupIdB64 && redirects[activeGroupIdB64]) {
     activeGroupIdB64 = redirects[activeGroupIdB64] ?? activeGroupIdB64;
   }
-});
-
-window.addEventListener('pin:send-raw-payload', (ev: Event) => {
-  const payload = (ev as CustomEvent<{ payload?: string }>).detail?.payload ?? '';
-  if (!payload) return;
-  void (async () => {
-    try {
-      await sendMessage(payload);
-    } catch (err) {
-      setGlobalStatus(`Error enviando nota de voz: ${(err as Error).message}`);
-    }
-  })();
+  if (!pinConsolidationRenderQueued && vault) {
+    pinConsolidationRenderQueued = true;
+    queueMicrotask(() => {
+      pinConsolidationRenderQueued = false;
+      if (vault) renderAll();
+    });
+  }
 });
