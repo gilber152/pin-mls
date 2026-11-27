@@ -126,6 +126,20 @@ function setWsStatus(online: boolean, label?: string): void {
 }
 
 function showChatView(): void {
+  /* === PIN_LOCK_CHAT_VIEW_START === */
+  try {
+    localStorage.setItem('pin_mls_has_active_session_v1', '1');
+    localStorage.removeItem('pin_mls_manual_logout_v1');
+  } catch {}
+  document.documentElement.classList.add('pin-session-active');
+  document.documentElement.classList.remove('pin-boot-hide-onboarding');
+  viewOnboarding.hidden = true;
+  viewOnboarding.classList.add('hidden');
+  viewOnboarding.style.display = 'none';
+  viewChat.hidden = false;
+  viewChat.classList.remove('hidden');
+  viewChat.style.display = '';
+  /* === PIN_LOCK_CHAT_VIEW_END === */
   viewOnboarding.classList.add('hidden');
   viewChat.classList.remove('hidden');
   if (vault) myPinLabel.textContent = formatPin(vault.pin);
@@ -133,6 +147,18 @@ function showChatView(): void {
 }
 
 function showOnboardingView(): void {
+  /* === PIN_LOCK_ONBOARDING_VIEW_START === */
+  try {
+    localStorage.removeItem('pin_mls_has_active_session_v1');
+  } catch {}
+  document.documentElement.classList.remove('pin-session-active', 'pin-boot-hide-onboarding');
+  viewChat.hidden = true;
+  viewChat.classList.add('hidden');
+  viewChat.style.display = 'none';
+  viewOnboarding.hidden = false;
+  viewOnboarding.classList.remove('hidden');
+  viewOnboarding.style.display = '';
+  /* === PIN_LOCK_ONBOARDING_VIEW_END === */
   viewChat.classList.add('hidden');
   viewOnboarding.classList.remove('hidden');
 }

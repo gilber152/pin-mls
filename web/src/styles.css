@@ -2002,3 +2002,20 @@ dialog h3 {
   opacity: 1 !important;
 }
 /* === PIN_ONBOARDING_WHITE_TITLE_END === */
+/* === PIN_LOCK_ONBOARDING_CSS_START === */
+html.pin-boot-hide-onboarding #view-onboarding,
+html.pin-session-active #view-onboarding,
+#view-onboarding[hidden],
+#view-onboarding.hidden {
+  display: none !important;
+  visibility: hidden !important;
+}
+
+#onboarding-status:empty {
+  display: none !important;
+  height: 0 !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  border: 0 !important;
+}
+/* === PIN_LOCK_ONBOARDING_CSS_END === */
