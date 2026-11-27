@@ -929,6 +929,11 @@ async function respondInvite(
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err);
     if (errMsg.includes('CONTACT_REQUEST_NOT_FOUND') || errMsg.includes('HTTP 404')) {
+      if (vault) {
+        vault.incomingInvites = vault.incomingInvites.filter((i) => i.requestId !== requestId);
+        await saveVault(vault);
+        renderAll();
+      }
       setGlobalStatus('Esta solicitud ya fue procesada o expiró. Actualizando lista...');
       document.getElementById('btn-sync-now')?.click();
     } else {
@@ -1047,6 +1052,14 @@ async function syncNow(): Promise<void> {
         note,
         createdAt: cr.createdAt,
       });
+      dirty = true;
+    }
+
+    /* PIN_PRUNE_STALE_INVITES */
+    const liveServerInviteIds = new Set(data.contactRequests.map((item) => item.requestId));
+    const prevInvitesLen = vault.incomingInvites.length;
+    vault.incomingInvites = vault.incomingInvites.filter((inv) => liveServerInviteIds.has(inv.requestId));
+    if (vault.incomingInvites.length !== prevInvitesLen) {
       dirty = true;
     }
 

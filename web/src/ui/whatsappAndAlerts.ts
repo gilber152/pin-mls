@@ -1671,19 +1671,46 @@ class SoundAndNotificationController {
     const badgeInvites = document.getElementById('badge-invites');
     if (!listInvites) return;
 
-    const badgeNum = badgeInvites ? Number((badgeInvites.textContent || '').trim()) : 0;
     const hasPendingCards = listInvites.querySelectorAll('.list-card').length > 0;
-    const shouldShow = (!Number.isNaN(badgeNum) && badgeNum > 0) || hasPendingCards;
+    const shouldShow = hasPendingCards;
 
-    const container =
-      listInvites.closest<HTMLElement>(
-        'section, .card, .panel, .sidebar-section, [data-invites-box]'
-      ) || listInvites.parentElement;
+    const formInvite = document.getElementById('form-invite');
+    const listChats = document.getElementById('list-chats');
 
-    if (container && container !== document.body) {
-      container.classList.toggle('pin-invites-hidden', !shouldShow);
+    // Localizar el contenedor propio de "Solicitudes entrantes" sin englobar #form-invite ni #list-chats
+    let cur: HTMLElement | null = listInvites.parentElement;
+    let safeContainer: HTMLElement | null = null;
+    while (cur && cur !== document.body) {
+      const touchesSiblings =
+        (formInvite && cur.contains(formInvite)) || (listChats && cur.contains(listChats));
+      if (touchesSiblings) break;
+      safeContainer = cur;
+      if (badgeInvites && cur.contains(badgeInvites)) {
+        break;
+      }
+      cur = cur.parentElement;
+    }
+
+    if (safeContainer) {
+      safeContainer.classList.toggle('pin-invites-hidden', !shouldShow);
+      safeContainer.hidden = !shouldShow;
     } else {
       listInvites.classList.toggle('pin-invites-hidden', !shouldShow);
+      listInvites.hidden = !shouldShow;
+      const headerRow = (
+        badgeInvites?.parentElement && badgeInvites.parentElement !== listInvites.parentElement
+          ? badgeInvites.parentElement
+          : listInvites.previousElementSibling
+      ) as HTMLElement | null;
+
+      if (
+        headerRow &&
+        (!formInvite || !headerRow.contains(formInvite)) &&
+        (!listChats || !headerRow.contains(listChats))
+      ) {
+        headerRow.classList.toggle('pin-invites-hidden', !shouldShow);
+        headerRow.hidden = !shouldShow;
+      }
     }
   }
 

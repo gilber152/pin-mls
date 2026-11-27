@@ -2533,3 +2533,9 @@ button[aria-label*="audio" i] {
   opacity: 0.82;
 }
 /* === PIN_REPLY_VOICE_STYLE_END === */
+/* === PIN_INVITES_AUTO_HIDE_START === */
+.pin-invites-hidden {
+  display: none !important;
+  visibility: hidden !important;
+}
+/* === PIN_INVITES_AUTO_HIDE_END === */
