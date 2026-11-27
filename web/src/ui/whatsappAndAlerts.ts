@@ -175,6 +175,22 @@ class SoundAndNotificationController {
           lca.setAttribute('data-pin-mobile-grid', 'true');
           sidebarRoot.setAttribute('data-pin-mobile-sidebar', 'true');
           stageRoot.setAttribute('data-pin-mobile-stage', 'true');
+          // Etiquetar cualquier contenedor intermedio para que no corte la cadena flex de altura
+          let up: HTMLElement | null = lca.parentElement;
+          while (up && up !== viewChat && up !== document.body) {
+            up.setAttribute('data-pin-mobile-fill', 'true');
+            up = up.parentElement;
+          }
+          up = chatActive.parentElement;
+          while (up && up !== stageRoot && up !== document.body) {
+            up.setAttribute('data-pin-mobile-fill', 'true');
+            up = up.parentElement;
+          }
+          up = listChats.parentElement;
+          while (up && up !== sidebarRoot && up !== document.body) {
+            up.setAttribute('data-pin-mobile-chats-wrapper', 'true');
+            up = up.parentElement;
+          }
         }
       }
     }
@@ -320,7 +336,18 @@ class SoundAndNotificationController {
         this.setMobileChatOpen(false);
       });
 
+      const syncVisualViewport = () => {
+        const h = window.visualViewport?.height ?? window.innerHeight;
+        if (h > 0) {
+          document.documentElement.style.setProperty('--pin-vvh', `${Math.round(h)}px`);
+        }
+      };
+      syncVisualViewport();
+      window.visualViewport?.addEventListener('resize', syncVisualViewport);
+      window.addEventListener('orientationchange', () => window.setTimeout(syncVisualViewport, 150));
+
       window.addEventListener('resize', () => {
+        syncVisualViewport();
         if (!this.isMobileViewport()) {
           document.body.classList.remove('pin-mobile-chat-open', 'pin-mobile-menu-open');
           this.syncMobileMenuButtonLabel();
