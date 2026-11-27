@@ -1,4 +1,9 @@
-import webpush from 'web-push';
+import * as webpushMod from 'web-push';
+
+const webpush: typeof webpushMod =
+  typeof webpushMod.setVapidDetails === 'function'
+    ? webpushMod
+    : ((webpushMod as unknown as { default?: typeof webpushMod }).default ?? webpushMod);
 import { env } from '../../config/env.js';
 import { pool } from '../db.js';
 
