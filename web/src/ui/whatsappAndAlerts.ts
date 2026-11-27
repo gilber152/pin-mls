@@ -140,14 +140,37 @@ class SoundAndNotificationController {
     toggleBtn.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
   }
 
+  private syncOnboardingStateClass(): void {
+    if (typeof document === 'undefined') return;
+    const onboarding = document.getElementById('view-onboarding');
+    const chatView = document.getElementById('view-chat');
+    const isOnboardingVisible =
+      Boolean(
+        onboarding &&
+          !onboarding.hidden &&
+          !onboarding.classList.contains('hidden') &&
+          onboarding.style.display !== 'none'
+      ) || Boolean(chatView && (chatView.hidden || chatView.classList.contains('hidden')));
+
+    document.body.classList.toggle('pin-onboarding-visible', isOnboardingVisible);
+    if (isOnboardingVisible) {
+      document.body.classList.remove('pin-mobile-chat-open', 'pin-mobile-menu-open');
+      this.syncMobileMenuButtonLabel();
+    }
+  }
+
   private tagMobileLayoutContainers(): void {
     if (typeof document === 'undefined') return;
+
+    this.syncOnboardingStateClass();
 
     const listChats = document.getElementById('list-chats');
     const chatActive = document.getElementById('chat-active');
     const viewChat = document.getElementById('view-chat');
+    let sidebarRoot: HTMLElement | null = null;
+    let stageRoot: HTMLElement | null = null;
 
-    // 1. Identificar dinámicamente la columna lateral y el panel de chat por ancestro común
+    // 1. Identificar columna lateral y panel de chat por ancestro común
     if (listChats && chatActive) {
       const sidebarAncestors: HTMLElement[] = [];
       let cur: HTMLElement | null = listChats;
@@ -169,13 +192,13 @@ class SoundAndNotificationController {
       }
 
       if (lca) {
-        const sidebarRoot = sidebarAncestors.find((el) => el.parentElement === lca);
-        const stageRoot = stageAncestors.find((el) => el.parentElement === lca);
+        sidebarRoot = sidebarAncestors.find((el) => el.parentElement === lca) ?? null;
+        stageRoot = stageAncestors.find((el) => el.parentElement === lca) ?? null;
         if (sidebarRoot && stageRoot && sidebarRoot !== stageRoot) {
           lca.setAttribute('data-pin-mobile-grid', 'true');
           sidebarRoot.setAttribute('data-pin-mobile-sidebar', 'true');
           stageRoot.setAttribute('data-pin-mobile-stage', 'true');
-          // Etiquetar cualquier contenedor intermedio para que no corte la cadena flex de altura
+
           let up: HTMLElement | null = lca.parentElement;
           while (up && up !== viewChat && up !== document.body) {
             up.setAttribute('data-pin-mobile-fill', 'true');
@@ -195,9 +218,9 @@ class SoundAndNotificationController {
       }
     }
 
-    // 2. Identificar cabecera principal
-    const headerAnchor =
-      document.getElementById('btn-sync-now') || document.getElementById('my-pin-label');
+    // 2. Identificar cabecera principal y grupo de acciones secundarias
+    const syncBtn = document.getElementById('btn-sync-now');
+    const headerAnchor = syncBtn || document.getElementById('my-pin-label');
     let mainHeader: HTMLElement | null = null;
     if (headerAnchor) {
       let cur: HTMLElement | null = headerAnchor;
@@ -208,12 +231,26 @@ class SoundAndNotificationController {
         }
         cur = cur.parentElement;
       }
-      if (mainHeader && !mainHeader.contains(listChats)) {
+      if (mainHeader && (!listChats || !mainHeader.contains(listChats))) {
         mainHeader.setAttribute('data-pin-mobile-main-header', 'true');
       }
     }
 
-    // 3. Marcar las barras superiores adicionales como colapsables en móvil
+    if (syncBtn && mainHeader && syncBtn.parentElement && syncBtn.parentElement !== mainHeader) {
+      const actionsGroup = syncBtn.parentElement;
+      const myPin = document.getElementById('my-pin-label');
+      const contactsBtn = document.getElementById('btn-search-saved-contacts');
+      const menuBtn = document.getElementById('btn-mobile-menu-toggle');
+      if (
+        (!myPin || !actionsGroup.contains(myPin)) &&
+        (!contactsBtn || !actionsGroup.contains(contactsBtn)) &&
+        (!menuBtn || !actionsGroup.contains(menuBtn))
+      ) {
+        actionsGroup.setAttribute('data-pin-mobile-actions-group', 'true');
+      }
+    }
+
+    // 3. Marcar las barras superiores adicionales como colapsables en móvil (nunca el sidebar)
     const extraAnchors = [
       document.getElementById('pin-btn-edit-alias'),
       document.querySelector<HTMLElement>('input[placeholder*="Invitar varios" i]'),
@@ -222,12 +259,17 @@ class SoundAndNotificationController {
 
     for (const anchor of extraAnchors) {
       if (!anchor) continue;
+      if (sidebarRoot && sidebarRoot.contains(anchor)) continue;
+      if (stageRoot && stageRoot.contains(anchor)) continue;
+
       let cur: HTMLElement | null = anchor;
       while (
         cur &&
         cur.parentElement &&
         cur.parentElement !== document.body &&
-        (!listChats || !cur.parentElement.contains(listChats))
+        cur.parentElement !== viewChat &&
+        (!listChats || !cur.parentElement.contains(listChats)) &&
+        (!mainHeader || !cur.parentElement.contains(mainHeader))
       ) {
         cur = cur.parentElement;
       }
@@ -277,7 +319,7 @@ class SoundAndNotificationController {
       }
     }
 
-    // 6. Enlazar eventos globales de navegación móvil en fase de captura
+    // 6. Enlazar eventos globales de navegación móvil y visualViewport
     if (!this.mobileEventsBound && typeof window !== 'undefined') {
       this.mobileEventsBound = true;
 
@@ -304,7 +346,6 @@ class SoundAndNotificationController {
             ) ??
               null);
 
-          // Capturar ANTES de que main.ts vacíe #list-chats con innerHTML = ''
           if (chatCard && !clickedDelete) {
             this.setMobileChatOpen(true);
             return;
@@ -337,14 +378,20 @@ class SoundAndNotificationController {
       });
 
       const syncVisualViewport = () => {
-        const h = window.visualViewport?.height ?? window.innerHeight;
+        const vv = window.visualViewport;
+        const h = vv ? vv.height : window.innerHeight;
         if (h > 0) {
           document.documentElement.style.setProperty('--pin-vvh', `${Math.round(h)}px`);
         }
+        if (this.isMobileViewport() && window.scrollY !== 0) {
+          window.scrollTo(0, 0);
+        }
       };
+
       syncVisualViewport();
       window.visualViewport?.addEventListener('resize', syncVisualViewport);
-      window.addEventListener('orientationchange', () => window.setTimeout(syncVisualViewport, 150));
+      window.visualViewport?.addEventListener('scroll', syncVisualViewport);
+      window.addEventListener('orientationchange', () => window.setTimeout(syncVisualViewport, 160));
 
       window.addEventListener('resize', () => {
         syncVisualViewport();
