@@ -1994,3 +1994,11 @@ dialog h3 {
   }
 }
 /* === PIN_MOBILE_RESPONSIVE_END === */
+/* === PIN_ONBOARDING_WHITE_TITLE_START === */
+.pin-hero-white-text,
+.pin-hero-white-text * {
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff !important;
+  opacity: 1 !important;
+}
+/* === PIN_ONBOARDING_WHITE_TITLE_END === */
