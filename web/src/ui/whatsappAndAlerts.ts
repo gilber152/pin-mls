@@ -691,6 +691,8 @@ class SoundAndNotificationController {
         ''
       )
       .replace(new RegExp(`\\b(?:PIN\\s*)?${escapeRegexLiteral(rawMatchedPin)}\\b`, 'i'), '')
+      .replace(/\s*[·•]?\s*[eé]poca\s*\d+/gi, '')
+      .replace(/^[·•\s]+|[·•\s]+$/g, '')
       .trim();
 
     el.textContent = '';
@@ -737,33 +739,8 @@ class SoundAndNotificationController {
   }
 
   private ensureActiveChatDeleteButton(): void {
-    const activeTitle = document.getElementById('active-chat-title');
-    if (!activeTitle || !activeTitle.parentElement) return;
-    let btn = document.getElementById('btn-delete-active-contact') as HTMLButtonElement | null;
-    if (!btn) {
-      btn = document.createElement('button');
-      btn.id = 'btn-delete-active-contact';
-      btn.type = 'button';
-      btn.className = 'pin-delete-contact-btn';
-      btn.textContent = 'Eliminar';
-      btn.title = 'Eliminar contacto y conversación local';
-      btn.addEventListener('click', () => {
-        const titleEl = document.getElementById('active-chat-title');
-        const raw = (titleEl?.dataset.pinOriginal || titleEl?.textContent || '').toUpperCase();
-        const pin = raw.match(SINGLE_PIN_RE)?.[0] ?? '';
-        const activeCard = document.querySelector<HTMLElement>('#list-chats .list-card.active');
-        const groupIdB64 = activeCard?.dataset.groupId ?? '';
-        if (pin || groupIdB64) {
-          this.requestDeleteContact(pin, groupIdB64);
-        }
-      });
-      activeTitle.insertAdjacentElement('afterend', btn);
-    }
-
-    const rawTitle = (activeTitle.dataset.pinOriginal || activeTitle.textContent || '').toUpperCase();
-    const hasValidPin = SINGLE_PIN_RE.test(rawTitle);
-    const hasActiveCard = document.querySelector('#list-chats .list-card.active') !== null;
-    btn.hidden = !(hasValidPin || hasActiveCard);
+    const existing = document.getElementById('btn-delete-active-contact');
+    if (existing) existing.remove();
   }
 
   private sanitizeChatListPreviews(): void {
@@ -1012,6 +989,57 @@ class SoundAndNotificationController {
     }
   }
 
+  private cleanEpochAndStatusLabels(): void {
+    if (typeof document === 'undefined') return;
+
+    // 1. Ocultar o limpiar etiquetas de "época X" en la lista de conversaciones
+    document
+      .querySelectorAll<HTMLElement>('#list-chats .list-card span, #list-chats .list-card small, #list-chats .list-card div')
+      .forEach((el) => {
+        if (el.children.length > 0) return;
+        const txt = (el.textContent || '').trim();
+        if (/^[·•\s-]*[eé]poca\s*\d+[·•\s-]*$/i.test(txt)) {
+          el.textContent = '';
+          el.hidden = true;
+        }
+      });
+
+    // 2. Limpiar "época X" en la cabecera del chat activo
+    const chatHeader =
+      document.querySelector<HTMLElement>('[data-pin-mobile-chat-header="true"]') ||
+      document.getElementById('active-chat-title')?.parentElement;
+    if (chatHeader) {
+      chatHeader.querySelectorAll<HTMLElement>('span, small, div, p').forEach((el) => {
+        if (el.id === 'active-chat-title' || el.closest('#active-chat-title') || el.children.length > 0) return;
+        const raw = el.textContent || '';
+        if (/[eé]poca\s*\d+/i.test(raw)) {
+          const cleaned = raw
+            .replace(/\s*[·•]?\s*[eé]poca\s*\d+/gi, '')
+            .replace(/^\s*[·•]\s*/, '')
+            .replace(/\s*[·•]\s*$/, '')
+            .replace(/\s*[·•]\s*[·•]\s*/g, ' · ')
+            .trim();
+          el.textContent = cleaned;
+          if (!cleaned) el.hidden = true;
+        }
+      });
+    }
+
+    // 3. Quitar "(WSS)" del indicador de estado "En línea (WSS)"
+    const mainHeader =
+      document.querySelector<HTMLElement>('[data-pin-mobile-main-header="true"]') ||
+      document.querySelector<HTMLElement>('#view-chat > header, header, .topbar');
+    if (mainHeader) {
+      mainHeader.querySelectorAll<HTMLElement>('span, div, small, button').forEach((el) => {
+        if (el.children.length > 0) return;
+        const raw = el.textContent || '';
+        if (/en\s+l[ií]nea\s*\(\s*wss\s*\)/i.test(raw)) {
+          el.textContent = raw.replace(/en\s+l[ií]nea\s*\(\s*wss\s*\)/gi, 'En línea');
+        }
+      });
+    }
+  }
+
   syncAllViews(): void {
     if (typeof document === 'undefined' || this.syncingUi) return;
     this.syncingUi = true;
@@ -1019,6 +1047,7 @@ class SoundAndNotificationController {
       this.tagMobileLayoutContainers();
       this.syncInvitesVisibility();
       this.sanitizeChatListPreviews();
+      this.cleanEpochAndStatusLabels();
       this.installContactsSearchButton();
       document.querySelectorAll<HTMLElement>('.msg-bubble').forEach((el) => {
         this.sanitizeBubbleNode(el);

@@ -2215,3 +2215,68 @@ html.pin-session-active #view-onboarding,
   }
 }
 /* === PIN_MOBILE_MASTER_END === */
+/* === PIN_CHAT_POLISH_START === */
+/* 1. Quitar botón Eliminar de la cabecera del chat activo */
+#btn-delete-active-contact {
+  display: none !important;
+}
+
+/* 2. Fondo más oscuro en el área de chat (sin tocar burbujas ni sus letras) */
+#chat-active,
+#chat-empty,
+#messages-list,
+[data-pin-mobile-stage="true"],
+body.pin-mobile-chat-open,
+body.pin-mobile-chat-open [data-pin-mobile-stage="true"],
+body.pin-mobile-chat-open #chat-active:not([hidden]),
+body.pin-mobile-chat-open #messages-list {
+  background: #0d1b2e !important;
+  background-color: #0d1b2e !important;
+}
+
+/* 3. Cabecera del chat: nombre completo sin recortar y PIN al lado */
+#active-chat-title {
+  white-space: normal !important;
+  overflow: visible !important;
+  text-overflow: clip !important;
+  line-height: 1.3 !important;
+}
+
+#active-chat-title .pin-alias-wrap {
+  display: inline-flex !important;
+  flex-direction: row !important;
+  flex-wrap: wrap !important;
+  align-items: baseline !important;
+  gap: 3px 8px !important;
+  max-width: 100% !important;
+}
+
+#active-chat-title .pin-alias-name {
+  display: inline !important;
+  white-space: normal !important;
+  overflow: visible !important;
+  text-overflow: clip !important;
+  word-break: break-word !important;
+  font-weight: 700 !important;
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff !important;
+}
+
+#active-chat-title .pin-sub-code {
+  display: inline !important;
+  white-space: nowrap !important;
+  font-size: 0.82rem !important;
+  color: #bfdbfe !important;
+  -webkit-text-fill-color: #bfdbfe !important;
+  opacity: 0.95 !important;
+}
+
+@media (max-width: 860px) {
+  [data-pin-mobile-chat-header="true"] {
+    height: auto !important;
+    min-height: 54px !important;
+    overflow: visible !important;
+    background: #102a4c !important;
+  }
+}
+/* === PIN_CHAT_POLISH_END === */

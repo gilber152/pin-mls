@@ -122,7 +122,7 @@ function setGlobalStatus(msg: string): void {
 
 function setWsStatus(online: boolean, label?: string): void {
   wsBadge.className = `ws-badge ${online ? 'online' : 'offline'}`;
-  wsBadge.textContent = label ?? (online ? 'En línea (WSS)' : 'Reconectando...');
+  wsBadge.textContent = label ?? (online ? 'En línea' : 'Reconectando...');
 }
 
 function showChatView(): void {
@@ -253,7 +253,7 @@ function renderAll(): void {
       name.textContent = `PIN ${formatPin(grp.peerPin)}`;
       const ep = document.createElement('span');
       ep.className = 'muted-small';
-      ep.textContent = grp.active ? `época ${grp.epoch}` : 'removido';
+      ep.textContent = grp.active ? '' : 'removido';
       top.append(name, ep);
 
       const last = grp.messages[grp.messages.length - 1];
@@ -276,7 +276,7 @@ function renderAll(): void {
   chatEmpty.classList.add('hidden');
   chatActive.classList.remove('hidden');
   activeChatTitle.textContent = `PIN ${formatPin(activeGrp.peerPin)}`;
-  activeChatMeta.textContent = ` · época ${activeGrp.epoch} · ${activeGrp.messages.length} mensajes`;
+  activeChatMeta.textContent = ` · ${activeGrp.messages.length} mensajes`;
 
   messagesList.innerHTML = '';
   for (const m of activeGrp.messages) {
@@ -1251,7 +1251,7 @@ async function connectWebSocket(): Promise<void> {
     ws = socket;
 
     socket.onopen = () => {
-      setWsStatus(true, 'En línea (WSS)');
+      setWsStatus(true, 'En línea');
     };
 
     socket.onmessage = (ev) => {
