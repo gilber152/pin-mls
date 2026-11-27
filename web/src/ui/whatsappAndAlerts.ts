@@ -12,6 +12,7 @@ export interface IncomingMessageAlert {
 
 const PIN_PATTERN = /\b[A-Z0-9]{4}-?[A-Z0-9]{4}\b/g;
 const SINGLE_PIN_RE = /\b[A-Z0-9]{4}-?[A-Z0-9]{4}\b/;
+const MOBILE_BREAKPOINT_PX = 860;
 
 type PatchedWindow = Window & {
   pinSetAlias?: (pin: string, alias: string) => Promise<void>;
@@ -91,6 +92,7 @@ class SoundAndNotificationController {
   private aliasesByCanonical: Record<string, string> = {};
   private aliasesByCompact: Record<string, string> = {};
   private syncingUi = false;
+  private mobileEventsBound = false;
 
   constructor() {
     if (typeof window !== 'undefined') {
@@ -104,6 +106,194 @@ class SoundAndNotificationController {
       window.addEventListener('keydown', onGesture, { passive: true });
     }
     void this.refreshAliasesFromVault();
+  }
+
+  private isMobileViewport(): boolean {
+    return typeof window !== 'undefined' && window.innerWidth <= MOBILE_BREAKPOINT_PX;
+  }
+
+  private setMobileChatOpen(open: boolean): void {
+    if (typeof document === 'undefined') return;
+    if (open && this.isMobileViewport()) {
+      document.body.classList.add('pin-mobile-chat-open');
+      document.body.classList.remove('pin-mobile-menu-open');
+    } else {
+      document.body.classList.remove('pin-mobile-chat-open');
+    }
+    this.syncMobileMenuButtonLabel();
+  }
+
+  private syncMobileMenuButtonLabel(): void {
+    const toggleBtn = document.getElementById('btn-mobile-menu-toggle');
+    if (!toggleBtn) return;
+    const isOpen = document.body.classList.contains('pin-mobile-menu-open');
+    toggleBtn.textContent = isOpen ? '✕ Cerrar' : '☰ Menú';
+    toggleBtn.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+  }
+
+  private tagMobileLayoutContainers(): void {
+    if (typeof document === 'undefined') return;
+
+    const listChats = document.getElementById('list-chats');
+    const chatActive = document.getElementById('chat-active');
+    const viewChat = document.getElementById('view-chat');
+
+    // 1. Identificar dinámicamente la columna lateral y el panel de chat por ancestro común (LCA)
+    if (listChats && chatActive) {
+      const sidebarAncestors: HTMLElement[] = [];
+      let cur: HTMLElement | null = listChats;
+      while (cur && cur !== document.body) {
+        sidebarAncestors.push(cur);
+        cur = cur.parentElement;
+      }
+
+      const stageAncestors: HTMLElement[] = [];
+      cur = chatActive;
+      let lca: HTMLElement | null = null;
+      while (cur && cur !== document.body) {
+        if (sidebarAncestors.includes(cur)) {
+          lca = cur;
+          break;
+        }
+        stageAncestors.push(cur);
+        cur = cur.parentElement;
+      }
+
+      if (lca) {
+        const sidebarRoot = sidebarAncestors.find((el) => el.parentElement === lca);
+        const stageRoot = stageAncestors.find((el) => el.parentElement === lca);
+        if (sidebarRoot && stageRoot && sidebarRoot !== stageRoot) {
+          lca.setAttribute('data-pin-mobile-grid', 'true');
+          sidebarRoot.setAttribute('data-pin-mobile-sidebar', 'true');
+          stageRoot.setAttribute('data-pin-mobile-stage', 'true');
+        }
+      }
+    }
+
+    // 2. Identificar cabecera principal (donde vive #my-pin-label o #btn-sync-now)
+    const headerAnchor =
+      document.getElementById('btn-sync-now') || document.getElementById('my-pin-label');
+    let mainHeader: HTMLElement | null = null;
+    if (headerAnchor) {
+      let cur: HTMLElement | null = headerAnchor;
+      while (cur && cur.parentElement && cur.parentElement !== document.body) {
+        if (cur.parentElement === viewChat || cur.tagName === 'HEADER') {
+          mainHeader = cur;
+          break;
+        }
+        cur = cur.parentElement;
+      }
+      if (mainHeader && !mainHeader.contains(listChats)) {
+        mainHeader.setAttribute('data-pin-mobile-main-header', 'true');
+      }
+    }
+
+    // 3. Marcar las barras superiores adicionales (buscador / invitar grupo) como colapsables en móvil
+    const extraAnchors = [
+      document.getElementById('pin-btn-edit-alias'),
+      document.querySelector<HTMLElement>('input[placeholder*="Invitar varios" i]'),
+      document.querySelector<HTMLElement>('input[placeholder*="Buscar localmente" i]'),
+    ];
+
+    for (const anchor of extraAnchors) {
+      if (!anchor) continue;
+      let cur: HTMLElement | null = anchor;
+      while (
+        cur &&
+        cur.parentElement &&
+        cur.parentElement !== document.body &&
+        (!listChats || !cur.parentElement.contains(listChats))
+      ) {
+        cur = cur.parentElement;
+      }
+      if (
+        cur &&
+        cur !== document.body &&
+        cur !== viewChat &&
+        cur !== mainHeader &&
+        (!listChats || !cur.contains(listChats)) &&
+        (!chatActive || !cur.contains(chatActive))
+      ) {
+        cur.setAttribute('data-pin-mobile-collapsible', 'true');
+      }
+    }
+
+    // 4. Inyectar botón ☰ Menú en la cabecera principal
+    if (mainHeader && !document.getElementById('btn-mobile-menu-toggle')) {
+      const menuBtn = document.createElement('button');
+      menuBtn.id = 'btn-mobile-menu-toggle';
+      menuBtn.type = 'button';
+      menuBtn.className = 'pin-mobile-only-btn';
+      menuBtn.textContent = '☰ Menú';
+      menuBtn.setAttribute('aria-expanded', 'false');
+      menuBtn.addEventListener('click', () => {
+        document.body.classList.toggle('pin-mobile-menu-open');
+        this.syncMobileMenuButtonLabel();
+      });
+      mainHeader.appendChild(menuBtn);
+    }
+
+    // 5. Marcar cabecera del chat activo e inyectar botón ← Volver
+    const activeTitle = document.getElementById('active-chat-title');
+    if (activeTitle && activeTitle.parentElement) {
+      activeTitle.parentElement.setAttribute('data-pin-mobile-chat-header', 'true');
+      if (!document.getElementById('btn-mobile-chat-back')) {
+        const backBtn = document.createElement('button');
+        backBtn.id = 'btn-mobile-chat-back';
+        backBtn.type = 'button';
+        backBtn.className = 'pin-mobile-back-btn';
+        backBtn.textContent = '←';
+        backBtn.title = 'Volver a conversaciones';
+        backBtn.setAttribute('aria-label', 'Volver a conversaciones');
+        backBtn.addEventListener('click', () => {
+          this.setMobileChatOpen(false);
+        });
+        activeTitle.insertAdjacentElement('beforebegin', backBtn);
+      }
+    }
+
+    // 6. Enlazar eventos globales de navegación móvil una sola vez
+    if (!this.mobileEventsBound && typeof window !== 'undefined') {
+      this.mobileEventsBound = true;
+
+      document.addEventListener('click', (ev) => {
+        const target = ev.target as HTMLElement | null;
+        if (!target) return;
+
+        // Al tocar una tarjeta de chat en móvil, abrir pantalla de conversación
+        const chatCard = target.closest<HTMLElement>('#list-chats .list-card');
+        if (chatCard && !target.closest('.pin-delete-contact-btn')) {
+          this.setMobileChatOpen(true);
+          return;
+        }
+
+        // Al pulsar Salir o Borrar bóveda, resetear estado móvil
+        if (target.closest('#btn-logout-session, #btn-wipe-vault')) {
+          document.body.classList.remove('pin-mobile-chat-open', 'pin-mobile-menu-open');
+          this.syncMobileMenuButtonLabel();
+          return;
+        }
+
+        // Cerrar menú desplegable móvil tras pulsar una acción de diálogo
+        if (
+          target.closest('#btn-open-devices, #btn-open-safe, #btn-sync-now, #pin-btn-edit-alias')
+        ) {
+          document.body.classList.remove('pin-mobile-menu-open');
+          this.syncMobileMenuButtonLabel();
+        }
+      });
+
+      window.addEventListener('pin:delete-contact', () => {
+        this.setMobileChatOpen(false);
+      });
+
+      window.addEventListener('resize', () => {
+        if (!this.isMobileViewport()) {
+          document.body.classList.remove('pin-mobile-chat-open', 'pin-mobile-menu-open');
+          this.syncMobileMenuButtonLabel();
+        }
+      });
+    }
   }
 
   private applyAliasMap(map: PinAliasMap): void {
@@ -152,7 +342,8 @@ class SoundAndNotificationController {
   requestDeleteContact(pin: string, groupIdB64 = ''): void {
     const canonical = pin ? formatPinCanonical(pin) : '';
     const alias = canonical ? this.getAliasForPin(canonical) : undefined;
-    const displayLabel = alias && canonical ? `${alias} (${canonical})` : canonical || 'este contacto';
+    const displayLabel =
+      alias && canonical ? `${alias} (${canonical})` : canonical || 'este contacto';
     const confirmed = window.confirm(
       `¿Eliminar a ${displayLabel} y su conversación local de este dispositivo?`
     );
@@ -386,7 +577,10 @@ class SoundAndNotificationController {
 
     const suffix = original
       .replace(
-        new RegExp(`\\b${escapeRegexLiteral(cleanAlias)}\\s*\\(${escapeRegexLiteral(rawMatchedPin)}\\)`, 'i'),
+        new RegExp(
+          `\\b${escapeRegexLiteral(cleanAlias)}\\s*\\(${escapeRegexLiteral(rawMatchedPin)}\\)`,
+          'i'
+        ),
         ''
       )
       .replace(new RegExp(`\\b(?:PIN\\s*)?${escapeRegexLiteral(rawMatchedPin)}\\b`, 'i'), '')
@@ -444,7 +638,8 @@ class SoundAndNotificationController {
       btn.id = 'btn-delete-active-contact';
       btn.type = 'button';
       btn.className = 'pin-delete-contact-btn';
-      btn.textContent = 'Eliminar contacto';
+      btn.textContent = 'Eliminar';
+      btn.title = 'Eliminar contacto y conversación local';
       btn.addEventListener('click', () => {
         const titleEl = document.getElementById('active-chat-title');
         const raw = (titleEl?.dataset.pinOriginal || titleEl?.textContent || '').toUpperCase();
@@ -457,6 +652,11 @@ class SoundAndNotificationController {
       });
       activeTitle.insertAdjacentElement('afterend', btn);
     }
+
+    const rawTitle = (activeTitle.dataset.pinOriginal || activeTitle.textContent || '').toUpperCase();
+    const hasValidPin = SINGLE_PIN_RE.test(rawTitle);
+    const hasActiveCard = document.querySelector('#list-chats .list-card.active') !== null;
+    btn.hidden = !(hasValidPin || hasActiveCard);
   }
 
   private sanitizeChatListPreviews(): void {
@@ -626,6 +826,7 @@ class SoundAndNotificationController {
         openBtn.addEventListener('click', () => {
           if (item.element.isConnected) {
             item.element.click();
+            this.setMobileChatOpen(true);
             item.element.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
           } else {
             const inviteInput = document.getElementById(
@@ -635,6 +836,7 @@ class SoundAndNotificationController {
               inviteInput.value = item.pin;
               inviteInput.dispatchEvent(new Event('input', { bubbles: true }));
             }
+            this.setMobileChatOpen(false);
           }
           popover.remove();
         });
@@ -674,14 +876,16 @@ class SoundAndNotificationController {
     btn.title = 'Buscar contactos guardados';
     btn.addEventListener('click', () => this.openContactsSearchPopover());
 
-    const searchInput = document.querySelector<HTMLElement>(
-      'input[placeholder*="Buscar" i], input[id*="search" i]'
+    const header = document.querySelector<HTMLElement>(
+      '[data-pin-mobile-main-header="true"], #view-chat > header, header, .topbar'
     );
-    if (searchInput && searchInput.parentElement) {
-      searchInput.parentElement.appendChild(btn);
-    } else {
-      const header = document.querySelector<HTMLElement>('#view-chat > header, header, .topbar');
-      if (header) header.appendChild(btn);
+    if (header) {
+      const menuBtn = document.getElementById('btn-mobile-menu-toggle');
+      if (menuBtn && menuBtn.parentElement === header) {
+        header.insertBefore(btn, menuBtn);
+      } else {
+        header.appendChild(btn);
+      }
     }
   }
 
@@ -689,6 +893,7 @@ class SoundAndNotificationController {
     if (typeof document === 'undefined' || this.syncingUi) return;
     this.syncingUi = true;
     try {
+      this.tagMobileLayoutContainers();
       this.syncInvitesVisibility();
       this.sanitizeChatListPreviews();
       this.installContactsSearchButton();

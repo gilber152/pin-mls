@@ -1596,3 +1596,401 @@ dialog h3 {
   border: 0 !important;
 }
 /* === PIN_HIDE_EMPTY_STATUS_END === */
+/* === PIN_MOBILE_RESPONSIVE_START === */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+/* Botones exclusivos de móvil ocultos en escritorio */
+.pin-mobile-only-btn,
+.pin-mobile-back-btn {
+  display: none !important;
+}
+
+@media (max-width: 860px) {
+  html,
+  body {
+    width: 100% !important;
+    max-width: 100vw !important;
+    height: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow-x: hidden !important;
+    -webkit-text-size-adjust: 100%;
+    background: #e9f1f8 !important;
+  }
+
+  /* Evitar zoom automático en iOS Safari al enfocar inputs */
+  input,
+  textarea,
+  select {
+    font-size: 16px !important;
+  }
+
+  /* Onboarding limpio y cómodo en móvil */
+  #view-onboarding:not([hidden]) {
+    min-height: 100dvh !important;
+    padding: 18px 14px calc(20px + env(safe-area-inset-bottom)) !important;
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: center !important;
+  }
+
+  #view-onboarding button {
+    width: 100% !important;
+    min-height: 46px !important;
+    border-radius: 12px !important;
+    font-size: 1rem !important;
+  }
+
+  /* Contenedor principal de la app ajustado al alto real del móvil (100dvh) */
+  #view-chat:not([hidden]) {
+    display: flex !important;
+    flex-direction: column !important;
+    width: 100% !important;
+    max-width: 100vw !important;
+    height: 100dvh !important;
+    min-height: 100dvh !important;
+    overflow: hidden !important;
+  }
+
+  /* Mostrar botones exclusivos de móvil */
+  .pin-mobile-only-btn {
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    background: #1d4ed8 !important;
+    color: #ffffff !important;
+    -webkit-text-fill-color: #ffffff !important;
+    border: 1px solid #3b82f6 !important;
+    border-radius: 10px !important;
+    padding: 7px 11px !important;
+    font-size: 0.86rem !important;
+    font-weight: 700 !important;
+    min-height: 36px;
+    white-space: nowrap;
+    cursor: pointer;
+  }
+
+  .pin-mobile-back-btn {
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    min-width: 36px;
+    border-radius: 999px !important;
+    background: rgba(255, 255, 255, 0.16) !important;
+    color: #ffffff !important;
+    -webkit-text-fill-color: #ffffff !important;
+    border: 1px solid rgba(255, 255, 255, 0.28) !important;
+    font-size: 1.15rem !important;
+    font-weight: 700 !important;
+    padding: 0 !important;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+
+  /* Cabecera principal compacta en móvil */
+  [data-pin-mobile-main-header="true"] {
+    display: flex !important;
+    flex-wrap: wrap !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    gap: 8px !important;
+    padding: calc(8px + env(safe-area-inset-top)) 10px 8px 10px !important;
+    width: 100% !important;
+    flex-shrink: 0 !important;
+  }
+
+  /* Ocultar botones secundarios en cabecera hasta abrir ☰ Menú */
+  body:not(.pin-mobile-menu-open) #btn-sync-now,
+  body:not(.pin-mobile-menu-open) #btn-open-devices,
+  body:not(.pin-mobile-menu-open) #btn-open-safe,
+  body:not(.pin-mobile-menu-open) #btn-logout-session,
+  body:not(.pin-mobile-menu-open) #btn-wipe-vault {
+    display: none !important;
+  }
+
+  /* Cuando ☰ Menú está abierto, organizar los botones en cuadrícula táctil */
+  body.pin-mobile-menu-open #btn-sync-now,
+  body.pin-mobile-menu-open #btn-open-devices,
+  body.pin-mobile-menu-open #btn-open-safe,
+  body.pin-mobile-menu-open #btn-logout-session,
+  body.pin-mobile-menu-open #btn-wipe-vault {
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+    flex: 1 1 calc(50% - 6px) !important;
+    min-height: 40px !important;
+    border-radius: 10px !important;
+    font-size: 0.86rem !important;
+    padding: 8px 10px !important;
+  }
+
+  /* Barras extra superiores (buscador, alias, invitar grupo) colapsables con ☰ Menú */
+  body:not(.pin-mobile-menu-open) [data-pin-mobile-collapsible="true"] {
+    display: none !important;
+  }
+
+  body.pin-mobile-menu-open [data-pin-mobile-collapsible="true"] {
+    display: flex !important;
+    flex-wrap: wrap !important;
+    align-items: center !important;
+    gap: 8px !important;
+    padding: 8px 10px !important;
+    width: 100% !important;
+    max-width: 100vw !important;
+    background: #102a4c !important;
+    border-bottom: 1px solid #1e40af !important;
+    flex-shrink: 0 !important;
+  }
+
+  body.pin-mobile-menu-open [data-pin-mobile-collapsible="true"] input {
+    flex: 1 1 100% !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    min-height: 40px !important;
+    padding: 8px 12px !important;
+    border-radius: 10px !important;
+  }
+
+  body.pin-mobile-menu-open [data-pin-mobile-collapsible="true"] button {
+    min-height: 38px !important;
+    border-radius: 10px !important;
+  }
+
+  /* Ocultar cabecera global cuando ya estás dentro de un chat para maximizar espacio */
+  body.pin-mobile-chat-open:not(.pin-mobile-menu-open) [data-pin-mobile-main-header="true"] {
+    display: none !important;
+  }
+
+  /* Layout Maestro-Detalle */
+  [data-pin-mobile-grid="true"] {
+    display: flex !important;
+    flex-direction: column !important;
+    grid-template-columns: 1fr !important;
+    flex: 1 1 auto !important;
+    min-height: 0 !important;
+    width: 100% !important;
+    max-width: 100vw !important;
+    overflow: hidden !important;
+    padding: 0 !important;
+    gap: 0 !important;
+  }
+
+  /* PANTALLA 1: Lista de contactos e invitación */
+  body:not(.pin-mobile-chat-open) [data-pin-mobile-sidebar="true"] {
+    display: flex !important;
+    flex-direction: column !important;
+    flex: 1 1 auto !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+    min-height: 0 !important;
+    overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch;
+    padding: 12px 12px calc(18px + env(safe-area-inset-bottom)) 12px !important;
+    gap: 12px !important;
+    background: #0f294a !important;
+  }
+
+  body:not(.pin-mobile-chat-open) [data-pin-mobile-stage="true"] {
+    display: none !important;
+  }
+
+  /* Formulario "Invitar por PIN" compacto y táctil */
+  #form-invite {
+    display: grid !important;
+    grid-template-columns: 1fr auto !important;
+    gap: 8px !important;
+    width: 100% !important;
+  }
+
+  #input-invite-pin {
+    min-height: 42px !important;
+    padding: 8px 12px !important;
+    border-radius: 10px !important;
+    width: 100% !important;
+    min-width: 0 !important;
+  }
+
+  #btn-send-invite {
+    min-height: 42px !important;
+    padding: 8px 16px !important;
+    border-radius: 10px !important;
+    white-space: nowrap !important;
+  }
+
+  #input-invite-note {
+    grid-column: 1 / -1 !important;
+    min-height: 40px !important;
+    padding: 8px 12px !important;
+    border-radius: 10px !important;
+    width: 100% !important;
+  }
+
+  /* Tarjetas de chats amplias y fáciles de tocar */
+  #list-chats {
+    background: transparent !important;
+    gap: 8px !important;
+    padding: 0 !important;
+    min-height: 80px !important;
+  }
+
+  #list-chats .list-card {
+    padding: 12px 14px !important;
+    border-radius: 14px !important;
+    box-shadow: 0 2px 8px rgba(15, 23, 42, 0.14);
+  }
+
+  #list-chats .list-card .card-row {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    gap: 8px !important;
+  }
+
+  /* PANTALLA 2: Conversación activa a pantalla completa */
+  body.pin-mobile-chat-open [data-pin-mobile-sidebar="true"] {
+    display: none !important;
+  }
+
+  body.pin-mobile-chat-open [data-pin-mobile-stage="true"] {
+    display: flex !important;
+    flex-direction: column !important;
+    flex: 1 1 auto !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+    min-height: 0 !important;
+    height: 100% !important;
+    overflow: hidden !important;
+    padding: 0 !important;
+  }
+
+  body.pin-mobile-chat-open #chat-active:not([hidden]) {
+    display: flex !important;
+    flex-direction: column !important;
+    flex: 1 1 auto !important;
+    min-height: 0 !important;
+    height: 100% !important;
+    width: 100% !important;
+  }
+
+  /* Barra superior del chat activo */
+  [data-pin-mobile-chat-header="true"] {
+    display: flex !important;
+    align-items: center !important;
+    gap: 8px !important;
+    padding: calc(10px + env(safe-area-inset-top)) 12px 10px 10px !important;
+    background: #0f294a !important;
+    border-bottom: 2px solid #0b57d0 !important;
+    flex-shrink: 0 !important;
+    width: 100% !important;
+  }
+
+  #active-chat-title {
+    flex: 1 1 auto !important;
+    min-width: 0 !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    font-size: 0.98rem !important;
+    line-height: 1.25 !important;
+  }
+
+  #btn-delete-active-contact {
+    margin-left: auto !important;
+    padding: 6px 10px !important;
+    font-size: 0.78rem !important;
+    border-radius: 8px !important;
+    white-space: nowrap !important;
+  }
+
+  /* Área de mensajes con scroll suave */
+  #messages-list {
+    flex: 1 1 auto !important;
+    min-height: 0 !important;
+    overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch;
+    padding: 12px 10px !important;
+    gap: 8px !important;
+    width: 100% !important;
+  }
+
+  .msg-bubble {
+    max-width: 86% !important;
+    padding: 9px 12px !important;
+    border-radius: 14px !important;
+  }
+
+  /* Barra de envío fija abajo con estilo mensajería moderna */
+  #form-send-msg {
+    display: flex !important;
+    align-items: center !important;
+    gap: 8px !important;
+    padding: 8px 10px calc(10px + env(safe-area-inset-bottom)) 10px !important;
+    background: #ffffff !important;
+    border-top: 1px solid #cbd5e1 !important;
+    flex-shrink: 0 !important;
+    width: 100% !important;
+  }
+
+  #input-msg {
+    flex: 1 1 auto !important;
+    min-width: 0 !important;
+    min-height: 44px !important;
+    padding: 10px 14px !important;
+    border-radius: 999px !important;
+    border: 1.5px solid #94a3b8 !important;
+  }
+
+  #form-send-msg button[type="submit"],
+  #form-send-msg button {
+    min-height: 44px !important;
+    padding: 0 18px !important;
+    border-radius: 999px !important;
+    font-weight: 700 !important;
+    flex-shrink: 0 !important;
+  }
+
+  /* Popover de Contactos y Modales <dialog> ajustados a pantalla móvil */
+  .pin-contacts-popover {
+    top: calc(58px + env(safe-area-inset-top)) !important;
+    left: 10px !important;
+    right: 10px !important;
+    width: auto !important;
+    max-width: none !important;
+    max-height: 76dvh !important;
+    border-radius: 14px !important;
+    padding: 14px !important;
+  }
+
+  .pin-contacts-row {
+    padding: 10px !important;
+    border-radius: 10px !important;
+  }
+
+  dialog#safe-dialog,
+  dialog#link-wait-dialog,
+  dialog#devices-dialog,
+  dialog {
+    width: calc(100vw - 20px) !important;
+    max-width: calc(100vw - 20px) !important;
+    max-height: 86dvh !important;
+    padding: 14px !important;
+    border-radius: 14px !important;
+    margin: auto !important;
+  }
+
+  .pin-top-toast-container {
+    top: calc(10px + env(safe-area-inset-top)) !important;
+    left: 10px !important;
+    right: 10px !important;
+    max-width: none !important;
+  }
+}
+/* === PIN_MOBILE_RESPONSIVE_END === */
