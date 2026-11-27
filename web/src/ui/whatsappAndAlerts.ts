@@ -93,6 +93,10 @@ class SoundAndNotificationController {
   private aliasesByCompact: Record<string, string> = {};
   private syncingUi = false;
   private mobileEventsBound = false;
+  private lastActiveChatKey = '';
+  private suppressAlertsUntil = Date.now() + 2500;
+  private seenChatPreviews = new Map<string, string>();
+  private lastSoundPlayedAt = 0;
 
   constructor() {
     if (typeof window !== 'undefined') {
@@ -106,6 +110,96 @@ class SoundAndNotificationController {
       window.addEventListener('keydown', onGesture, { passive: true });
     }
     void this.refreshAliasesFromVault();
+  }
+
+  private suppressNotificationsFor(ms = 900): void {
+    const target = Date.now() + ms;
+    if (target > this.suppressAlertsUntil) {
+      this.suppressAlertsUntil = target;
+    }
+  }
+
+  private getCurrentActiveChatKey(): string {
+    if (typeof document === 'undefined') return '';
+    const activeCard = document.querySelector<HTMLElement>('#list-chats .list-card.active');
+    if (activeCard?.dataset.groupId) {
+      return `gid:${activeCard.dataset.groupId}`;
+    }
+    const activeTitle = document.getElementById('active-chat-title');
+    const raw = (activeTitle?.dataset.pinOriginal || activeTitle?.textContent || '')
+      .trim()
+      .toUpperCase();
+    const pin = raw.match(SINGLE_PIN_RE)?.[0];
+    if (pin) return `pin:${formatPinCanonical(pin)}`;
+    return raw ? `title:${raw}` : '';
+  }
+
+  private buildBubbleKey(el: HTMLElement, cleanText: string, chatKey: string): string {
+    const dataId = el.getAttribute('data-message-id') || '';
+    if (dataId) return `${chatKey}|id:${dataId}`;
+    const metaEl = el.querySelector<HTMLElement>('.msg-meta');
+    const metaRaw = (metaEl?.textContent || '').trim();
+    const seq = metaRaw.match(/#\d+/)?.[0] ?? '';
+    const mineFlag = el.classList.contains('mine') ? '1' : '0';
+    if (seq) {
+      return `${chatKey}|${mineFlag}|${seq}`;
+    }
+    return `${chatKey}|${mineFlag}|${cleanText}`;
+  }
+
+  private seedVisibleBubblesSilently(chatKey: string): void {
+    document.querySelectorAll<HTMLElement>('.msg-bubble, [data-message-id]').forEach((el) => {
+      const cleanText = this.sanitizeBubbleNode(el);
+      if (!cleanText) return;
+      const key = this.buildBubbleKey(el, cleanText, chatKey);
+      this.seenMessageKeys.add(key);
+    });
+  }
+
+  private syncChatListPreviewAlerts(silent: boolean): void {
+    if (typeof document === 'undefined') return;
+    const cards = document.querySelectorAll<HTMLElement>('#list-chats .list-card');
+    cards.forEach((card) => {
+      const rawText = (card.textContent || '').trim();
+      const pinMatch = rawText.toUpperCase().match(SINGLE_PIN_RE)?.[0];
+      const canonicalPin = pinMatch ? formatPinCanonical(pinMatch) : '';
+      const cardKey = card.dataset.groupId
+        ? `gid:${card.dataset.groupId}`
+        : canonicalPin
+          ? `pin:${canonicalPin}`
+          : '';
+      if (!cardKey) return;
+
+      let previewText = '';
+      const previewEls = Array.from(card.querySelectorAll<HTMLElement>('.muted-small, small, p'));
+      for (const el of previewEls) {
+        if (el.hidden) continue;
+        const t = extractCleanMessageText((el.textContent || '').trim()).trim();
+        if (!t || /^[·•\s-]*[eé]poca\s*\d+[·•\s-]*$/i.test(t)) continue;
+        previewText = t;
+      }
+
+      const prev = this.seenChatPreviews.get(cardKey);
+      this.seenChatPreviews.set(cardKey, previewText);
+
+      if (silent || prev === undefined || prev === previewText) return;
+      if (card.classList.contains('active')) return;
+      if (!previewText) return;
+      if (/^t[uú]:/i.test(previewText)) return;
+      if (/sin mensajes|a[uú]n no|conversaci[oó]n creada/i.test(previewText)) return;
+
+      const senderLabel =
+        (canonicalPin && this.getAliasForPin(canonicalPin)) ||
+        canonicalPin ||
+        'Nuevo mensaje';
+
+      const groupId = card.dataset.groupId || canonicalPin;
+      void this.notifyIncomingMessage({
+        senderLabel,
+        previewText: previewText.slice(0, 120),
+        ...(groupId ? { groupId } : {}),
+      });
+    });
   }
 
   private isMobileViewport(): boolean {
@@ -170,7 +264,6 @@ class SoundAndNotificationController {
     let sidebarRoot: HTMLElement | null = null;
     let stageRoot: HTMLElement | null = null;
 
-    // 1. Identificar columna lateral y panel de chat por ancestro común
     if (listChats && chatActive) {
       const sidebarAncestors: HTMLElement[] = [];
       let cur: HTMLElement | null = listChats;
@@ -218,7 +311,6 @@ class SoundAndNotificationController {
       }
     }
 
-    // 2. Identificar cabecera principal y grupo de acciones secundarias
     const syncBtn = document.getElementById('btn-sync-now');
     const headerAnchor = syncBtn || document.getElementById('my-pin-label');
     let mainHeader: HTMLElement | null = null;
@@ -250,7 +342,6 @@ class SoundAndNotificationController {
       }
     }
 
-    // 3. Marcar las barras superiores adicionales como colapsables en móvil (nunca el sidebar)
     const extraAnchors = [
       document.getElementById('pin-btn-edit-alias'),
       document.querySelector<HTMLElement>('input[placeholder*="Invitar varios" i]'),
@@ -285,7 +376,6 @@ class SoundAndNotificationController {
       }
     }
 
-    // 4. Inyectar botón ☰ Menú en la cabecera principal
     if (mainHeader && !document.getElementById('btn-mobile-menu-toggle')) {
       const menuBtn = document.createElement('button');
       menuBtn.id = 'btn-mobile-menu-toggle';
@@ -300,7 +390,6 @@ class SoundAndNotificationController {
       mainHeader.appendChild(menuBtn);
     }
 
-    // 5. Marcar cabecera del chat activo e inyectar botón ← Volver
     const activeTitle = document.getElementById('active-chat-title');
     if (activeTitle && activeTitle.parentElement) {
       activeTitle.parentElement.setAttribute('data-pin-mobile-chat-header', 'true');
@@ -319,7 +408,6 @@ class SoundAndNotificationController {
       }
     }
 
-    // 6. Enlazar eventos globales de navegación móvil y visualViewport
     if (!this.mobileEventsBound && typeof window !== 'undefined') {
       this.mobileEventsBound = true;
 
@@ -346,12 +434,15 @@ class SoundAndNotificationController {
             ) ??
               null);
 
+          // Silenciar alertas antes de que main.ts cargue el historial de ese contacto
           if (chatCard && !clickedDelete) {
+            this.suppressNotificationsFor(900);
             this.setMobileChatOpen(true);
             return;
           }
 
           if (target.closest('#btn-logout-session, #btn-wipe-vault')) {
+            this.suppressNotificationsFor(1500);
             window.setTimeout(() => {
               document.body.classList.remove('pin-mobile-chat-open', 'pin-mobile-menu-open');
               this.syncMobileMenuButtonLabel();
@@ -374,6 +465,7 @@ class SoundAndNotificationController {
       );
 
       window.addEventListener('pin:delete-contact', () => {
+        this.suppressNotificationsFor(1000);
         this.setMobileChatOpen(false);
       });
 
@@ -517,6 +609,10 @@ class SoundAndNotificationController {
 
   async playMessageTone(): Promise<void> {
     if (!this.soundEnabled) return;
+    const nowMs = Date.now();
+    if (nowMs - this.lastSoundPlayedAt < 350) return;
+    this.lastSoundPlayedAt = nowMs;
+
     const ctx = this.ensureContextAfterGesture();
     if (!ctx) return;
 
@@ -743,6 +839,122 @@ class SoundAndNotificationController {
     if (existing) existing.remove();
   }
 
+  private cleanEpochAndStatusLabels(): void {
+    if (typeof document === 'undefined') return;
+
+    document
+      .querySelectorAll<HTMLElement>(
+        '#list-chats .list-card span, #list-chats .list-card small, #list-chats .list-card div'
+      )
+      .forEach((el) => {
+        if (el.children.length > 0) return;
+        const txt = (el.textContent || '').trim();
+        if (/^[·•\s-]*[eé]poca\s*\d+[·•\s-]*$/i.test(txt)) {
+          el.textContent = '';
+          el.hidden = true;
+        }
+      });
+
+    const chatHeader =
+      document.querySelector<HTMLElement>('[data-pin-mobile-chat-header="true"]') ||
+      document.getElementById('active-chat-title')?.parentElement;
+    if (chatHeader) {
+      chatHeader.querySelectorAll<HTMLElement>('span, small, div, p').forEach((el) => {
+        if (
+          el.id === 'active-chat-title' ||
+          el.closest('#active-chat-title') ||
+          el.children.length > 0
+        ) {
+          return;
+        }
+        const raw = el.textContent || '';
+        if (/[eé]poca\s*\d+/i.test(raw)) {
+          const cleaned = raw
+            .replace(/\s*[·•]?\s*[eé]poca\s*\d+/gi, '')
+            .replace(/^\s*[·•]\s*/, '')
+            .replace(/\s*[·•]\s*$/, '')
+            .replace(/\s*[·•]\s*[·•]\s*/g, ' · ')
+            .trim();
+          el.textContent = cleaned;
+          if (!cleaned) el.hidden = true;
+        }
+      });
+    }
+
+    const mainHeader =
+      document.querySelector<HTMLElement>('[data-pin-mobile-main-header="true"]') ||
+      document.querySelector<HTMLElement>('#view-chat > header, header, .topbar');
+    if (mainHeader) {
+      mainHeader.querySelectorAll<HTMLElement>('span, div, small, button').forEach((el) => {
+        if (el.children.length > 0) return;
+        const raw = el.textContent || '';
+        if (/en\s+l[ií]nea\s*\(\s*wss\s*\)/i.test(raw)) {
+          el.textContent = raw.replace(/en\s+l[ií]nea\s*\(\s*wss\s*\)/gi, 'En línea');
+        }
+      });
+    }
+  }
+
+  private hideDisabledControls(): void {
+    if (typeof document === 'undefined') return;
+
+    document
+      .querySelectorAll<HTMLInputElement>(
+        'input[placeholder*="Buscar localmente" i], input[placeholder*="mensajes o PINs" i]'
+      )
+      .forEach((inp) => {
+        inp.setAttribute('data-pin-force-hidden', 'true');
+        const next = inp.nextElementSibling as HTMLElement | null;
+        if (
+          next &&
+          next.tagName === 'BUTTON' &&
+          next.id !== 'pin-btn-edit-alias' &&
+          next.id !== 'btn-search-saved-contacts'
+        ) {
+          const t = (next.textContent || '').trim();
+          const title = (
+            next.getAttribute('title') ||
+            next.getAttribute('aria-label') ||
+            ''
+          ).toLowerCase();
+          if (
+            t === '×' ||
+            t === '✕' ||
+            t.toLowerCase() === 'x' ||
+            title.includes('limpiar') ||
+            title.includes('clear')
+          ) {
+            next.setAttribute('data-pin-force-hidden', 'true');
+          }
+        }
+      });
+
+    document.querySelectorAll<HTMLElement>('button').forEach((btn) => {
+      if (btn.id === 'pin-btn-edit-alias' || btn.id === 'btn-search-saved-contacts') return;
+      const meta = [
+        btn.id,
+        btn.className,
+        btn.getAttribute('title') || '',
+        btn.getAttribute('aria-label') || '',
+        btn.textContent || '',
+      ]
+        .join(' ')
+        .toLowerCase();
+
+      if (/sonido|sound|audio|volumen|volume|mute|silenciar|🔊|🔇|🔉|🔈/.test(meta)) {
+        btn.setAttribute('data-pin-force-hidden', 'true');
+      }
+    });
+
+    document.querySelectorAll<HTMLElement>('span, div, small, p').forEach((el) => {
+      if (el.children.length > 0) return;
+      const txt = (el.textContent || '').trim();
+      if (/sesi[oó]n\s+lista\s*\(\s*presencia\s+local\s*\)/i.test(txt)) {
+        el.setAttribute('data-pin-force-hidden', 'true');
+      }
+    });
+  }
+
   private sanitizeChatListPreviews(): void {
     if (typeof document === 'undefined') return;
     const chatCards = document.querySelectorAll<HTMLElement>('#list-chats .list-card');
@@ -925,6 +1137,7 @@ class SoundAndNotificationController {
         openBtn.addEventListener('click', () => {
           const liveCard = this.findLiveChatCard(item.pin, item.groupIdB64);
           if (liveCard) {
+            this.suppressNotificationsFor(900);
             liveCard.click();
             this.setMobileChatOpen(true);
             liveCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -989,112 +1202,6 @@ class SoundAndNotificationController {
     }
   }
 
-  private cleanEpochAndStatusLabels(): void {
-    if (typeof document === 'undefined') return;
-
-    // 1. Ocultar o limpiar etiquetas de "época X" en la lista de conversaciones
-    document
-      .querySelectorAll<HTMLElement>('#list-chats .list-card span, #list-chats .list-card small, #list-chats .list-card div')
-      .forEach((el) => {
-        if (el.children.length > 0) return;
-        const txt = (el.textContent || '').trim();
-        if (/^[·•\s-]*[eé]poca\s*\d+[·•\s-]*$/i.test(txt)) {
-          el.textContent = '';
-          el.hidden = true;
-        }
-      });
-
-    // 2. Limpiar "época X" en la cabecera del chat activo
-    const chatHeader =
-      document.querySelector<HTMLElement>('[data-pin-mobile-chat-header="true"]') ||
-      document.getElementById('active-chat-title')?.parentElement;
-    if (chatHeader) {
-      chatHeader.querySelectorAll<HTMLElement>('span, small, div, p').forEach((el) => {
-        if (el.id === 'active-chat-title' || el.closest('#active-chat-title') || el.children.length > 0) return;
-        const raw = el.textContent || '';
-        if (/[eé]poca\s*\d+/i.test(raw)) {
-          const cleaned = raw
-            .replace(/\s*[·•]?\s*[eé]poca\s*\d+/gi, '')
-            .replace(/^\s*[·•]\s*/, '')
-            .replace(/\s*[·•]\s*$/, '')
-            .replace(/\s*[·•]\s*[·•]\s*/g, ' · ')
-            .trim();
-          el.textContent = cleaned;
-          if (!cleaned) el.hidden = true;
-        }
-      });
-    }
-
-    // 3. Quitar "(WSS)" del indicador de estado "En línea (WSS)"
-    const mainHeader =
-      document.querySelector<HTMLElement>('[data-pin-mobile-main-header="true"]') ||
-      document.querySelector<HTMLElement>('#view-chat > header, header, .topbar');
-    if (mainHeader) {
-      mainHeader.querySelectorAll<HTMLElement>('span, div, small, button').forEach((el) => {
-        if (el.children.length > 0) return;
-        const raw = el.textContent || '';
-        if (/en\s+l[ií]nea\s*\(\s*wss\s*\)/i.test(raw)) {
-          el.textContent = raw.replace(/en\s+l[ií]nea\s*\(\s*wss\s*\)/gi, 'En línea');
-        }
-      });
-    }
-  }
-
-  private hideDisabledControls(): void {
-    if (typeof document === 'undefined') return;
-
-    // 1. Ocultar caja "Buscar localmente en mensajes o PINs..." y su botón de limpiar (×)
-    document
-      .querySelectorAll<HTMLInputElement>(
-        'input[placeholder*="Buscar localmente" i], input[placeholder*="mensajes o PINs" i]'
-      )
-      .forEach((inp) => {
-        inp.setAttribute('data-pin-force-hidden', 'true');
-        const next = inp.nextElementSibling as HTMLElement | null;
-        if (
-          next &&
-          next.tagName === 'BUTTON' &&
-          next.id !== 'pin-btn-edit-alias' &&
-          next.id !== 'btn-search-saved-contacts'
-        ) {
-          const t = (next.textContent || '').trim();
-          const title = (next.getAttribute('title') || next.getAttribute('aria-label') || '').toLowerCase();
-          if (t === '×' || t === '✕' || t.toLowerCase() === 'x' || title.includes('limpiar') || title.includes('clear')) {
-            next.setAttribute('data-pin-force-hidden', 'true');
-          }
-        }
-      });
-
-    // 2. Ocultar botones/iconos de sonido (altavoz / volumen / mute)
-    document.querySelectorAll<HTMLElement>('button').forEach((btn) => {
-      if (btn.id === 'pin-btn-edit-alias' || btn.id === 'btn-search-saved-contacts') return;
-      const meta = [
-        btn.id,
-        btn.className,
-        btn.getAttribute('title') || '',
-        btn.getAttribute('aria-label') || '',
-        btn.textContent || '',
-      ]
-        .join(' ')
-        .toLowerCase();
-
-      if (
-        /sonido|sound|audio|volumen|volume|mute|silenciar|🔊|🔇|🔉|🔈/.test(meta)
-      ) {
-        btn.setAttribute('data-pin-force-hidden', 'true');
-      }
-    });
-
-    // 3. Ocultar el texto verde "Sesión lista (presencia local)"
-    document.querySelectorAll<HTMLElement>('span, div, small, p').forEach((el) => {
-      if (el.children.length > 0) return;
-      const txt = (el.textContent || '').trim();
-      if (/sesi[oó]ns+listas*(s*presencias+locals*)/i.test(txt)) {
-        el.setAttribute('data-pin-force-hidden', 'true');
-      }
-    });
-  }
-
   syncAllViews(): void {
     if (typeof document === 'undefined' || this.syncingUi) return;
     this.syncingUi = true;
@@ -1117,12 +1224,11 @@ class SoundAndNotificationController {
     if (typeof document === 'undefined' || this.observer) return;
 
     const seedExisting = () => {
+      this.suppressNotificationsFor(2500);
       this.syncAllViews();
-      document.querySelectorAll<HTMLElement>('.msg-bubble, [data-message-id]').forEach((el) => {
-        const cleanText = this.sanitizeBubbleNode(el);
-        const key = el.getAttribute('data-message-id') || cleanText;
-        if (key) this.seenMessageKeys.add(key);
-      });
+      this.lastActiveChatKey = this.getCurrentActiveChatKey();
+      this.seedVisibleBubblesSilently(this.lastActiveChatKey);
+      this.syncChatListPreviewAlerts(true);
     };
 
     seedExisting();
@@ -1133,6 +1239,7 @@ class SoundAndNotificationController {
       w.pinSetAlias = (pin: string, alias: string) => this.setPinAlias(pin, alias);
 
       window.addEventListener('pin:aliases-updated', (ev: Event) => {
+        this.suppressNotificationsFor(700);
         const detail = (ev as CustomEvent<{ aliases?: PinAliasMap }>).detail;
         if (detail && detail.aliases) {
           this.applyAliasMap(detail.aliases);
@@ -1145,6 +1252,7 @@ class SoundAndNotificationController {
       document.addEventListener('click', (ev) => {
         const target = ev.target as HTMLElement | null;
         if (target && target.closest('#pin-btn-edit-alias')) {
+          this.suppressNotificationsFor(700);
           window.setTimeout(() => void this.refreshAliasesFromVault(), 400);
         }
       });
@@ -1152,6 +1260,22 @@ class SoundAndNotificationController {
 
     this.observer = new MutationObserver((mutations) => {
       this.syncAllViews();
+
+      const currentChatKey = this.getCurrentActiveChatKey();
+      const chatChanged = currentChatKey !== this.lastActiveChatKey;
+      if (chatChanged) {
+        this.lastActiveChatKey = currentChatKey;
+        this.suppressNotificationsFor(700);
+      }
+
+      const isSuppressed = chatChanged || Date.now() < this.suppressAlertsUntil;
+      if (isSuppressed) {
+        this.seedVisibleBubblesSilently(currentChatKey);
+        this.syncChatListPreviewAlerts(true);
+        return;
+      }
+
+      const newlyReceived: IncomingMessageAlert[] = [];
 
       for (const mut of mutations) {
         mut.addedNodes.forEach((node) => {
@@ -1169,20 +1293,37 @@ class SoundAndNotificationController {
 
           for (const el of candidates) {
             const cleanText = this.sanitizeBubbleNode(el);
-            if (el.classList.contains('mine')) continue;
             if (!cleanText) continue;
 
-            const key = `${el.getAttribute('data-message-id') || ''}|${cleanText}`;
+            const key = this.buildBubbleKey(el, cleanText, currentChatKey);
             if (this.seenMessageKeys.has(key)) continue;
             this.seenMessageKeys.add(key);
 
-            void this.notifyIncomingMessage({
-              senderLabel: 'Nuevo mensaje',
+            if (el.classList.contains('mine')) continue;
+
+            const activeTitle = document.getElementById('active-chat-title');
+            const sender =
+              activeTitle?.querySelector('.pin-alias-name')?.textContent?.trim() ||
+              activeTitle?.dataset.pinOriginal ||
+              'Nuevo mensaje';
+
+            newlyReceived.push({
+              senderLabel: sender,
               previewText: cleanText.slice(0, 120),
+              ...(currentChatKey ? { groupId: currentChatKey } : {}),
             });
           }
         });
       }
+
+      if (newlyReceived.length > 0) {
+        const latest = newlyReceived[newlyReceived.length - 1];
+        if (latest) {
+          void this.notifyIncomingMessage(latest);
+        }
+      }
+
+      this.syncChatListPreviewAlerts(false);
     });
 
     this.observer.observe(document.body, { childList: true, subtree: true, characterData: true });
