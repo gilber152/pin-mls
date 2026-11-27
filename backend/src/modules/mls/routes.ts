@@ -1,3 +1,4 @@
+import { notifyGroupMembersWebPush } from '../../infra/push/webPushService.js';
 import { randomUUID } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import { pool } from '../../infra/db.js';
@@ -427,6 +428,10 @@ export async function registerMlsRoutes(fastify: FastifyInstance): Promise<void>
         },
         groupSeq,
       );
+
+      if (msgType === 'application') {
+        void notifyGroupMembersWebPush(groupId, senderDeviceId, req.auth!.pin, groupId.toString('base64'));
+      }
 
       return reply.code(200).send({ groupSeq });
     },

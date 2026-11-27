@@ -59,4 +59,7 @@ export const env = {
   POW_DIFFICULTY_INVITE: intEnv('POW_DIFFICULTY_INVITE', 10),
   POW_DIFFICULTY_SAFE: intEnv('POW_DIFFICULTY_SAFE', 10),
   PUSH_MODE: (process.env.PUSH_MODE ?? 'mock') as 'mock' | 'live',
+  VAPID_PUBLIC_KEY: (process.env.VAPID_PUBLIC_KEY ?? '').trim(),
+  VAPID_PRIVATE_KEY: (process.env.VAPID_PRIVATE_KEY ?? '').trim(),
+  VAPID_SUBJECT: (process.env.VAPID_SUBJECT ?? 'mailto:push@pin-mls.app').trim(),
 };

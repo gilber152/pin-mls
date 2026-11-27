@@ -1265,6 +1265,51 @@ class SoundAndNotificationController {
     }, 4000);
   }
 
+  private async showSystemNotification(title: string, body: string, rawGroupId?: string): Promise<void> {
+    if (typeof window === 'undefined' || !('Notification' in window) || Notification.permission !== 'granted') {
+      return;
+    }
+    const cleanGid = (rawGroupId ?? '').replace(/^gid:/, '').trim();
+    const tag = cleanGid ? `pin-mls-msg-${cleanGid}` : 'pin-mls-msg';
+
+    if ('serviceWorker' in navigator) {
+      try {
+        const reg =
+          (await navigator.serviceWorker.getRegistration('/')) ||
+          (await Promise.race([
+            navigator.serviceWorker.ready,
+            new Promise<null>((resolve) => window.setTimeout(() => resolve(null), 600)),
+          ]));
+        if (reg && typeof reg.showNotification === 'function') {
+          await reg.showNotification(title, {
+            body,
+            icon: '/icon-192.png',
+            badge: '/badge-72.png',
+            tag,
+            data: { url: '/', groupIdB64: cleanGid },
+          });
+          return;
+        }
+      } catch {
+        // Fallback a Notification directo
+      }
+    }
+
+    try {
+      const notif = new Notification(title, {
+        body,
+        icon: '/icon-192.png',
+        tag,
+      });
+      notif.onclick = () => {
+        window.focus();
+        notif.close();
+      };
+    } catch {
+      // Ignorado si el navegador móvil bloquea constructor Notification directo
+    }
+  }
+
   async notifyIncomingMessage(alert: IncomingMessageAlert): Promise<void> {
     const cleanPreview = this.replacePinsWithAliasesInText(
       extractCleanMessageText(alert.previewText)
@@ -1279,18 +1324,7 @@ class SoundAndNotificationController {
       Notification.permission === 'granted' &&
       (document.hidden || !document.hasFocus())
     ) {
-      try {
-        const notif = new Notification(cleanSender, {
-          body: cleanPreview,
-          tag: alert.groupId ? `pin-mls-${alert.groupId}` : 'pin-mls-msg',
-        });
-        notif.onclick = () => {
-          window.focus();
-          notif.close();
-        };
-      } catch {
-        // Ignorado si no está disponible
-      }
+      await this.showSystemNotification(cleanSender, cleanPreview, alert.groupId);
     }
 
     await this.playMessageTone();

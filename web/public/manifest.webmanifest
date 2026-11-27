@@ -1,0 +1,24 @@
+{
+  "name": "PIN-MLS · Chat Cifrado E2EE",
+  "short_name": "PIN-MLS",
+  "description": "Mensajería cifrada extremo a extremo por PIN (OpenMLS)",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0b1930",
+  "theme_color": "#0b57d0",
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

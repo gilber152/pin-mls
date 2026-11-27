@@ -1,3 +1,4 @@
+import { notifyDeviceWebPush } from './webPushService.js';
 import { Queue } from 'bullmq';
 import { env } from '../../config/env.js';
 import { parseBullConnection } from '../redis.js';
@@ -22,6 +23,9 @@ export const pushQueue = new Queue<DelayedPushJob>(PUSH_QUEUE_NAME, {
 });
 
 export async function enqueueDelayedPush(job: DelayedPushJob, delayMs = 6000): Promise<void> {
+  if (job.kind === 'invite') {
+    void notifyDeviceWebPush(job.deviceId, 'invite');
+  }
   const jobId = `push_${job.deviceId}_${job.kind}`;
   try {
     await pushQueue.add('notify', job, { delay: delayMs, jobId });

@@ -1,3 +1,4 @@
+import { ensureWebPushSubscribed, registerAppServiceWorker, unsubscribeWebPush } from './net/webPush.js';
 import { applyWhatsAppLayoutClasses, waAlerts } from './ui/whatsappAndAlerts.js';
 import type { VaultGroup, VaultState } from './types.js';
 import { loadVault, saveVault, wipeVault, setPinAlias, loadPinAliases, applySyncedPinAliases } from './storage/vaultDb.js';
@@ -1186,6 +1187,7 @@ async function syncNow(): Promise<void> {
     }
 
     void syncAliasesWithOwnDevicesIfNeeded();
+    /* PIN_WEBPUSH_AUTOSYNC */ void ensureWebPushAutoSync();
   } catch (err) {
     const msg = (err as Error).message;
     if (msg.includes('DEVICE_REVOKED')) {
@@ -2067,3 +2069,72 @@ window.addEventListener('pin:aliases-updated', (ev: Event) => {
   void syncAliasesWithOwnDevicesIfNeeded(true, removedPins);
 });
 /* === PIN_E2EE_ALIAS_SYNC_END === */
+
+/* === PIN_WEBPUSH_CLIENT_START === */
+let pinWebPushSyncedThisSession = false;
+
+void registerAppServiceWorker();
+
+async function ensureWebPushAutoSync(): Promise<void> {
+  if (!vault || pinWebPushSyncedThisSession) return;
+  if (typeof window === 'undefined' || !('Notification' in window)) return;
+  if (Notification.permission !== 'granted') return;
+  pinWebPushSyncedThisSession = true;
+  const res = await ensureWebPushSubscribed(api, vault, false);
+  if (!res.subscribed) {
+    pinWebPushSyncedThisSession = false;
+  }
+}
+
+window.addEventListener('pin:notif-toggle', (ev: Event) => {
+  const enabled = Boolean((ev as CustomEvent<{ enabled?: boolean }>).detail?.enabled);
+  waAlerts.setPreferences({ desktopNotifEnabled: enabled });
+  if (!vault) return;
+
+  if (enabled) {
+    void (async () => {
+      const res = await ensureWebPushSubscribed(api, vault!, true);
+      if (res.subscribed) {
+        pinWebPushSyncedThisSession = true;
+        setGlobalStatus('Notificaciones Push activadas en este dispositivo (incluso con app cerrada).');
+      } else if (res.reason) {
+        setGlobalStatus(res.reason);
+      }
+    })();
+  } else {
+    pinWebPushSyncedThisSession = false;
+    void unsubscribeWebPush(api, vault).then(() => {
+      setGlobalStatus('Notificaciones desactivadas en este dispositivo.');
+    });
+  }
+});
+
+window.addEventListener('pin:sw-wake-sync', () => {
+  if (vault) {
+    void syncNow();
+  }
+});
+
+window.addEventListener('pin:sw-open-group', (ev: Event) => {
+  const gid = (ev as CustomEvent<{ groupIdB64?: string }>).detail?.groupIdB64 ?? '';
+  if (vault && gid && vault.groups[gid]) {
+    activeGroupIdB64 = gid;
+    renderAll();
+  }
+  if (vault) {
+    void syncNow();
+  }
+});
+
+document.addEventListener(
+  'click',
+  (ev) => {
+    const target = ev.target instanceof HTMLElement ? ev.target : null;
+    if (vault && target?.closest('#btn-logout-session, #btn-wipe-vault')) {
+      pinWebPushSyncedThisSession = false;
+      void unsubscribeWebPush(api, vault);
+    }
+  },
+  true,
+);
+/* === PIN_WEBPUSH_CLIENT_END === */

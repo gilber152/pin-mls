@@ -20,11 +20,13 @@
     "ioredis": "^5.4.2",
     "jose": "^5.9.6",
     "pg": "^8.13.1",
+    "web-push": "^4.0.0",
     "ws": "^8.18.0"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
     "@types/pg": "^8.11.10",
+    "@types/web-push": "^3.6.4",
     "@types/ws": "^8.5.13",
     "typescript": "^5.7.2"
   }

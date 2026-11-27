@@ -231,7 +231,8 @@ export async function initStep1Enhancements(options?: {
   });
 
   notifBtn.addEventListener('click', async () => {
-    const nextEnabled = !prefs.notificationsEnabled;
+    const needsGrant = 'Notification' in window && Notification.permission !== 'granted';
+    const nextEnabled = needsGrant ? true : !prefs.notificationsEnabled;
     if (nextEnabled && 'Notification' in window && Notification.permission === 'default') {
       try {
         await Notification.requestPermission();
@@ -239,9 +240,15 @@ export async function initStep1Enhancements(options?: {
         // Ignorar
       }
     }
-    prefs = { ...prefs, notificationsEnabled: nextEnabled };
+    const granted = !('Notification' in window) || Notification.permission === 'granted';
+    prefs = { ...prefs, notificationsEnabled: nextEnabled && granted };
     notifBtn.textContent = prefs.notificationsEnabled ? '🔔' : '🔕';
     await saveUiPreferences(prefs);
+    window.dispatchEvent(
+      new CustomEvent('pin:notif-toggle', {
+        detail: { enabled: prefs.notificationsEnabled },
+      }),
+    );
   });
 
   document.addEventListener('click', (ev) => {

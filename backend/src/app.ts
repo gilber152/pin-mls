@@ -17,6 +17,7 @@ import { registerMlsRoutes } from './modules/mls/routes.js';
 import { registerSyncRoutes } from './modules/sync/routes.js';
 import { registerLinkRoutes } from './modules/link/routes.js';
 import { registerSafeRoutes } from './modules/safe/routes.js';
+import { registerPushRoutes } from './modules/push/routes.js';
 import { attachWsGateway } from './modules/ws/gateway.js';
 
 export async function buildApp(): Promise<FastifyInstance> {
@@ -84,6 +85,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await registerSyncRoutes(app);
   await registerLinkRoutes(app);
   await registerSafeRoutes(app);
+  await registerPushRoutes(app);
 
   await attachWsGateway(app);
 
