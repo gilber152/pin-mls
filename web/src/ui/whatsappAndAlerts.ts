@@ -12,7 +12,7 @@ export interface IncomingMessageAlert {
 
 const PIN_PATTERN = /\b[A-Z0-9]{4}-?[A-Z0-9]{4}\b/g;
 const SINGLE_PIN_RE = /\b[A-Z0-9]{4}-?[A-Z0-9]{4}\b/;
-const MOBILE_BREAKPOINT_PX = 860;
+const MOBILE_MEDIA_QUERY = '(max-width: 860px)';
 
 type PatchedWindow = Window & {
   pinSetAlias?: (pin: string, alias: string) => Promise<void>;
@@ -109,14 +109,23 @@ class SoundAndNotificationController {
   }
 
   private isMobileViewport(): boolean {
-    return typeof window !== 'undefined' && window.innerWidth <= MOBILE_BREAKPOINT_PX;
+    if (typeof window === 'undefined') return false;
+    if (typeof window.matchMedia === 'function') {
+      return window.matchMedia(MOBILE_MEDIA_QUERY).matches;
+    }
+    return window.innerWidth <= 860;
   }
 
   private setMobileChatOpen(open: boolean): void {
     if (typeof document === 'undefined') return;
     if (open && this.isMobileViewport()) {
+      this.tagMobileLayoutContainers();
       document.body.classList.add('pin-mobile-chat-open');
       document.body.classList.remove('pin-mobile-menu-open');
+      window.requestAnimationFrame(() => {
+        const msgs = document.getElementById('messages-list');
+        if (msgs) msgs.scrollTop = msgs.scrollHeight;
+      });
     } else {
       document.body.classList.remove('pin-mobile-chat-open');
     }
@@ -138,7 +147,7 @@ class SoundAndNotificationController {
     const chatActive = document.getElementById('chat-active');
     const viewChat = document.getElementById('view-chat');
 
-    // 1. Identificar dinámicamente la columna lateral y el panel de chat por ancestro común (LCA)
+    // 1. Identificar dinámicamente la columna lateral y el panel de chat por ancestro común
     if (listChats && chatActive) {
       const sidebarAncestors: HTMLElement[] = [];
       let cur: HTMLElement | null = listChats;
@@ -170,7 +179,7 @@ class SoundAndNotificationController {
       }
     }
 
-    // 2. Identificar cabecera principal (donde vive #my-pin-label o #btn-sync-now)
+    // 2. Identificar cabecera principal
     const headerAnchor =
       document.getElementById('btn-sync-now') || document.getElementById('my-pin-label');
     let mainHeader: HTMLElement | null = null;
@@ -188,7 +197,7 @@ class SoundAndNotificationController {
       }
     }
 
-    // 3. Marcar las barras superiores adicionales (buscador / invitar grupo) como colapsables en móvil
+    // 3. Marcar las barras superiores adicionales como colapsables en móvil
     const extraAnchors = [
       document.getElementById('pin-btn-edit-alias'),
       document.querySelector<HTMLElement>('input[placeholder*="Invitar varios" i]'),
@@ -252,36 +261,60 @@ class SoundAndNotificationController {
       }
     }
 
-    // 6. Enlazar eventos globales de navegación móvil una sola vez
+    // 6. Enlazar eventos globales de navegación móvil en fase de captura
     if (!this.mobileEventsBound && typeof window !== 'undefined') {
       this.mobileEventsBound = true;
 
-      document.addEventListener('click', (ev) => {
-        const target = ev.target as HTMLElement | null;
-        if (!target) return;
+      document.addEventListener(
+        'click',
+        (ev) => {
+          const target = ev.target instanceof HTMLElement ? ev.target : null;
+          if (!target) return;
 
-        // Al tocar una tarjeta de chat en móvil, abrir pantalla de conversación
-        const chatCard = target.closest<HTMLElement>('#list-chats .list-card');
-        if (chatCard && !target.closest('.pin-delete-contact-btn')) {
-          this.setMobileChatOpen(true);
-          return;
-        }
+          const path = typeof ev.composedPath === 'function' ? ev.composedPath() : [];
+          const clickedDelete =
+            Boolean(target.closest('.pin-delete-contact-btn')) ||
+            path.some(
+              (n) => n instanceof HTMLElement && n.classList.contains('pin-delete-contact-btn')
+            );
 
-        // Al pulsar Salir o Borrar bóveda, resetear estado móvil
-        if (target.closest('#btn-logout-session, #btn-wipe-vault')) {
-          document.body.classList.remove('pin-mobile-chat-open', 'pin-mobile-menu-open');
-          this.syncMobileMenuButtonLabel();
-          return;
-        }
+          const chatCard =
+            target.closest<HTMLElement>('#list-chats .list-card') ||
+            (path.find(
+              (n): n is HTMLElement =>
+                n instanceof HTMLElement &&
+                n.classList.contains('list-card') &&
+                (n.parentElement?.id === 'list-chats' || Boolean(n.closest('#list-chats')))
+            ) ??
+              null);
 
-        // Cerrar menú desplegable móvil tras pulsar una acción de diálogo
-        if (
-          target.closest('#btn-open-devices, #btn-open-safe, #btn-sync-now, #pin-btn-edit-alias')
-        ) {
-          document.body.classList.remove('pin-mobile-menu-open');
-          this.syncMobileMenuButtonLabel();
-        }
-      });
+          // Capturar ANTES de que main.ts vacíe #list-chats con innerHTML = ''
+          if (chatCard && !clickedDelete) {
+            this.setMobileChatOpen(true);
+            return;
+          }
+
+          if (target.closest('#btn-logout-session, #btn-wipe-vault')) {
+            window.setTimeout(() => {
+              document.body.classList.remove('pin-mobile-chat-open', 'pin-mobile-menu-open');
+              this.syncMobileMenuButtonLabel();
+            }, 0);
+            return;
+          }
+
+          if (
+            target.closest(
+              '#btn-open-devices, #btn-open-safe, #btn-sync-now, #pin-btn-edit-alias'
+            )
+          ) {
+            window.setTimeout(() => {
+              document.body.classList.remove('pin-mobile-menu-open');
+              this.syncMobileMenuButtonLabel();
+            }, 0);
+          }
+        },
+        true
+      );
 
       window.addEventListener('pin:delete-contact', () => {
         this.setMobileChatOpen(false);
@@ -714,9 +747,24 @@ class SoundAndNotificationController {
     }
   }
 
-  private collectSavedContacts(): Array<{ pin: string; groupIdB64: string; element: HTMLElement }> {
+  private findLiveChatCard(pin: string, groupIdB64: string): HTMLElement | null {
+    const cards = Array.from(document.querySelectorAll<HTMLElement>('#list-chats .list-card'));
+    if (groupIdB64) {
+      const byId = cards.find((c) => c.dataset.groupId === groupIdB64);
+      if (byId) return byId;
+    }
+    const targetCompact = normalizePinCompact(pin);
+    if (!targetCompact) return null;
+    return (
+      cards.find((c) =>
+        (c.textContent || '').toUpperCase().replace(/[^A-Z0-9]/g, '').includes(targetCompact)
+      ) ?? null
+    );
+  }
+
+  private collectSavedContacts(): Array<{ pin: string; groupIdB64: string }> {
     if (typeof document === 'undefined') return [];
-    const contacts: Array<{ pin: string; groupIdB64: string; element: HTMLElement }> = [];
+    const contacts: Array<{ pin: string; groupIdB64: string }> = [];
     const seenPins = new Set<string>();
 
     document.querySelectorAll<HTMLElement>('#list-chats .list-card').forEach((card) => {
@@ -727,13 +775,13 @@ class SoundAndNotificationController {
       const pin = formatPinCanonical(firstPin);
       if (seenPins.has(pin)) return;
       seenPins.add(pin);
-      contacts.push({ pin, groupIdB64: card.dataset.groupId ?? '', element: card });
+      contacts.push({ pin, groupIdB64: card.dataset.groupId ?? '' });
     });
 
     for (const pin of Object.keys(this.aliasesByCanonical)) {
       if (!seenPins.has(pin)) {
         seenPins.add(pin);
-        contacts.push({ pin, groupIdB64: '', element: document.createElement('div') });
+        contacts.push({ pin, groupIdB64: '' });
       }
     }
 
@@ -824,10 +872,11 @@ class SoundAndNotificationController {
         openBtn.className = 'btn-primary';
         openBtn.textContent = 'Abrir';
         openBtn.addEventListener('click', () => {
-          if (item.element.isConnected) {
-            item.element.click();
+          const liveCard = this.findLiveChatCard(item.pin, item.groupIdB64);
+          if (liveCard) {
+            liveCard.click();
             this.setMobileChatOpen(true);
-            item.element.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            liveCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
           } else {
             const inviteInput = document.getElementById(
               'input-invite-pin'
