@@ -1,6 +1,6 @@
 import { applyWhatsAppLayoutClasses, waAlerts } from './ui/whatsappAndAlerts.js';
 import type { VaultGroup, VaultState } from './types.js';
-import { loadVault, saveVault, wipeVault, setPinAlias } from './storage/vaultDb.js';
+import { loadVault, saveVault, wipeVault, setPinAlias, loadPinAliases, applySyncedPinAliases } from './storage/vaultDb.js';
 import { archiveMessagesForPin, consolidateVaultGroupsByPin } from './storage/pinGroupConsolidator.js';
 import { CryptoWorkerClient, type StartedLinkSessionDto } from './worker/workerClient.js';
 import {
@@ -226,7 +226,7 @@ function renderAll(): void {
   }
 
   /* PIN_CONSOLIDATE_BEFORE_RENDER */ consolidateVaultGroupsByPin(vault);
-  const groups = Object.values(vault.groups).sort((a, b) => {
+  const groups = Object.values(vault.groups).filter((g) => !isSelfSyncGroup(g, vault!.pin)).sort((a, b) => {
     const aTime = a.messages[a.messages.length - 1]?.sentAtMs ?? 0;
     const bTime = b.messages[b.messages.length - 1]?.sentAtMs ?? 0;
     return bTime - aTime;
@@ -440,6 +440,7 @@ async function openSecondaryLinkModal(): Promise<void> {
         };
 
         linkWaitStatus.textContent = `PIN ${formatPin(newVault.pin)} vinculado. Subiendo 20 KeyPackages OpenMLS...`;
+        /* PIN_LINKQR_RECEIVE_ALIASES */ await hydrateLocalAliasesFromVaultContacts(newVault);
         await api.replenishKeyPackages(newVault, 20, true);
         await api.getJwt(newVault, true);
 
@@ -766,6 +767,7 @@ btnAuthorizeLink.addEventListener('click', async () => {
   refreshDevicesButtons();
 
   try {
+    /* PIN_LINKQR_UPLOAD_ALIASES */ await mergeLocalAliasesIntoVaultContacts(vault);
     const out = await api.authorizeAndUploadLinkSession(vault, phrase, uri, (m) => {
       devicesStatus.textContent = m;
     });
@@ -1081,7 +1083,10 @@ async function syncNow(): Promise<void> {
             lastSeq: w.commitSeq,
             messages: [],
           };
-          if (!activeGroupIdB64) activeGroupIdB64 = joined.groupIdB64;
+          const joinedGrp = vault.groups[joined.groupIdB64];
+          if (!activeGroupIdB64 && joinedGrp && !isSelfSyncGroup(joinedGrp, vault.pin)) {
+            activeGroupIdB64 = joined.groupIdB64;
+          }
         } else {
           const grp = vault.groups[joined.groupIdB64];
           grp.epoch = joined.epoch;
@@ -1116,14 +1121,20 @@ async function syncNow(): Promise<void> {
         dirty = true;
 
         if (outcome.kind === 'commit') {
-          setGlobalStatus(
+          if (!isSelfSyncGroup(grp, vault.pin)) {
+            setGlobalStatus(
             outcome.active
               ? `Grupo OpenMLS con ${formatPin(grp.peerPin)} avanzó a época ${outcome.epoch}.`
               : `Este dispositivo fue excluido del grupo con ${formatPin(grp.peerPin)}.`,
           );
+          }
         } else if (outcome.kind === 'application' && outcome.plaintextJson) {
           if (!grp.messages.some((m) => m.groupSeq === env.groupSeq)) {
             const parsed = JSON.parse(outcome.plaintextJson) as { text: string; sentAtMs: number };
+            if (outcome.senderPin === vault.pin && (await tryHandleIncomingAliasSync(grp, parsed.text))) {
+              dirty = true;
+              continue;
+            }
             grp.messages.push({
               groupSeq: env.groupSeq,
               senderPin: outcome.senderPin,
@@ -1160,6 +1171,8 @@ async function syncNow(): Promise<void> {
       await api.replenishKeyPackages(vault, 15, false);
       await saveVault(vault);
     }
+
+    void syncAliasesWithOwnDevicesIfNeeded();
   } catch (err) {
     const msg = (err as Error).message;
     if (msg.includes('DEVICE_REVOKED')) {
@@ -1336,6 +1349,7 @@ btnSafeUpload.addEventListener('click', async () => {
   safeBusy = true;
   refreshSafeButtons();
   try {
+    /* PIN_SAFE_UPLOAD_ALIASES */ await mergeLocalAliasesIntoVaultContacts(vault);
     const out = await api.uploadSafeBackup(vault, phrase, (m) => { safeStatus.textContent = m; });
     await saveVault(vault);
     const msg = `Safe Backup rev #${out.revision} guardado (${out.contactsCount} contactos).`;
@@ -1370,6 +1384,7 @@ btnSafeRestore.addEventListener('click', async () => {
         (m) => { safeStatus.textContent = m; },
       );
       vault.contacts = summary.mergedContacts;
+      /* PIN_SAFE_RESTORE_ALIASES */ await hydrateLocalAliasesFromVaultContacts(vault);
       vault.safeBackupRevision = summary.restoredRevision;
       await saveVault(vault);
       safeDialog.close();
@@ -1379,6 +1394,7 @@ btnSafeRestore.addEventListener('click', async () => {
       void syncNow();
     } else {
       vault.contacts = summary.mergedContacts;
+      /* PIN_SAFE_RESTORE_ALIASES */ await hydrateLocalAliasesFromVaultContacts(vault);
       vault.safeBackupRevision = Math.max(vault.safeBackupRevision, summary.restoredRevision);
       await saveVault(vault);
       const msg = `Fusionado rev #${summary.restoredRevision}: ${summary.contactsImported} nuevos, ${summary.contactsUpdated} actualizados.`;
@@ -1641,3 +1657,400 @@ window.addEventListener('pin:groups-consolidated', (ev: Event) => {
     });
   }
 });
+
+/* === PIN_E2EE_ALIAS_SYNC_START === */
+const PIN_ALIAS_SYNC_HASH_KEY = 'pin_mls_last_alias_sync_hash_v1';
+let pinAliasSyncInFlight = false;
+
+function normalizePinCompactSync(pin: string): string {
+  return pin.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+}
+
+function isSelfSyncGroup(grp: VaultGroup | undefined, ownPin: string): boolean {
+  if (!grp) return false;
+  const peer = normalizePinCompactSync(grp.peerPin || '');
+  const own = normalizePinCompactSync(ownPin || '');
+  if (!peer) return true;
+  return Boolean(own && peer === own);
+}
+
+function computeAliasSyncHash(aliases: Record<string, string>, siblingIds: string[]): string {
+  const sortedAliases = Object.entries(aliases)
+    .map(([k, v]) => [normalizePinCompactSync(k), v.trim()] as const)
+    .filter(([k, v]) => k.length === 8 && v.length > 0)
+    .sort((a, b) => a[0].localeCompare(b[0]));
+  const sortedSiblings = [...siblingIds].sort();
+  return JSON.stringify({ a: sortedAliases, s: sortedSiblings });
+}
+
+async function mergeLocalAliasesIntoVaultContacts(targetVault: VaultState): Promise<Record<string, string>> {
+  const localAliases = await loadPinAliases();
+  const now = Date.now();
+  let changed = false;
+
+  for (const [rawPin, rawAlias] of Object.entries(localAliases)) {
+    const compactPin = normalizePinCompactSync(rawPin);
+    const cleanAlias = rawAlias.trim();
+    if (compactPin.length !== 8 || !cleanAlias) continue;
+
+    const existing = targetVault.contacts.find(
+      (c) => normalizePinCompactSync(c.pin) === compactPin,
+    );
+    if (existing) {
+      if ((existing.alias_local ?? '').trim() !== cleanAlias) {
+        existing.alias_local = cleanAlias;
+        existing.updated_at = Math.max(existing.updated_at || 0, now);
+        changed = true;
+      }
+    } else {
+      targetVault.contacts.push({
+        pin: compactPin,
+        pk_root_b64: '',
+        trust_state: 'tofu',
+        alias_local: cleanAlias,
+        updated_at: now,
+      });
+      changed = true;
+    }
+  }
+
+  if (changed && vault && targetVault === vault) {
+    await saveVault(targetVault);
+  }
+  return localAliases;
+}
+
+async function hydrateLocalAliasesFromVaultContacts(targetVault: VaultState): Promise<void> {
+  const localAliases = await loadPinAliases();
+  const toApply: Record<string, string> = {};
+  let hasUpdates = false;
+
+  for (const contact of targetVault.contacts) {
+    const compactPin = normalizePinCompactSync(contact.pin);
+    const contactAlias = (contact.alias_local ?? '').trim();
+    if (compactPin.length !== 8 || !contactAlias) continue;
+
+    const currentLocal = Object.entries(localAliases).find(
+      ([k]) => normalizePinCompactSync(k) === compactPin,
+    )?.[1];
+
+    if (!currentLocal || currentLocal.trim() !== contactAlias) {
+      toApply[compactPin] = contactAlias;
+      hasUpdates = true;
+    }
+  }
+
+  if (hasUpdates) {
+    await applySyncedPinAliases(toApply, []);
+  }
+}
+
+async function ensureSelfSyncGroup(
+  activeSiblingIds: string[],
+): Promise<VaultGroup | null> {
+  if (!vault || activeSiblingIds.length === 0) return null;
+
+  const existingSelfGroups = Object.values(vault.groups)
+    .filter((g) => g.active && isSelfSyncGroup(g, vault!.pin))
+    .sort((a, b) => (b.epoch - a.epoch) || (b.lastSeq - a.lastSeq));
+
+  if (existingSelfGroups.length > 0 && existingSelfGroups[0]) {
+    return existingSelfGroups[0];
+  }
+
+  const ownKps: Array<{ deviceId: string; kpRef: string; kpRaw: string }> = [];
+  for (const siblingId of activeSiblingIds) {
+    try {
+      const kp = await api.selfClaimKeyPackage(vault, siblingId);
+      ownKps.push({
+        deviceId: siblingId,
+        kpRef: kp.kpRef,
+        kpRaw: kp.kpRaw,
+      });
+    } catch {
+      // El dispositivo hermano aún no ha subido KeyPackages
+    }
+  }
+
+  if (ownKps.length === 0) return null;
+
+  const created = await worker.mlsCreateGroupAndAddMembers(
+    JSON.stringify(ownKps.map((k) => k.kpRaw)),
+  );
+  vault.mlsStorageJson = created.storageJson;
+
+  await api.authedJson(vault, '/v1/groups', 'POST', {
+    groupId: created.groupIdB64,
+    cipherSuite: created.cipherSuite,
+  });
+
+  const commitRes = await api.authedJson<{ confirmedCommitSeq: number; newEpoch: number }>(
+    vault,
+    `/v1/groups/${created.groupIdB64Url}/commits`,
+    'POST',
+    {
+      expectedBaseEpoch: created.baseEpoch,
+      clientMsgId: crypto.randomUUID(),
+      commitRaw: created.commitRawB64,
+      welcomeRaw: created.welcomeRawB64,
+      addedDevices: ownKps.map((k) => k.deviceId),
+      addedKpRefs: ownKps.map((k) => k.kpRef),
+      removedDevices: [],
+    },
+  );
+
+  const confirmed = await worker.mlsConfirmPendingCommit(created.groupIdB64);
+  vault.mlsStorageJson = confirmed.storageJson;
+
+  const selfGrp: VaultGroup = {
+    groupIdB64: created.groupIdB64,
+    groupIdB64Url: created.groupIdB64Url,
+    peerPin: vault.pin,
+    cipherSuite: created.cipherSuite,
+    epoch: confirmed.epoch,
+    active: true,
+    lastSeq: commitRes.confirmedCommitSeq,
+    messages: [],
+  };
+
+  vault.groups[selfGrp.groupIdB64] = selfGrp;
+  await saveVault(vault);
+  return selfGrp;
+}
+
+async function sendAliasSyncEnvelope(grp: VaultGroup, payloadJson: string): Promise<boolean> {
+  if (!vault || !grp.active) return false;
+
+  for (let retry = 0; retry < 2; retry += 1) {
+    const sentAtMs = Date.now();
+    const enc = await worker.mlsEncryptMessage(
+      grp.groupIdB64,
+      JSON.stringify({ text: payloadJson, sentAtMs }),
+    );
+    vault.mlsStorageJson = enc.storageJson;
+    await saveVault(vault);
+
+    const res = await api.authedFetch(vault, `/v1/groups/${grp.groupIdB64Url}/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        msgType: 'application',
+        epoch: enc.epoch,
+        clientMsgId: crypto.randomUUID(),
+        ciphertext: enc.ciphertextB64,
+      }),
+    });
+
+    if (res.status === 409 && retry === 0) {
+      await syncNow();
+      continue;
+    }
+    if (res.ok) {
+      const body = (await res.json().catch(() => null)) as { groupSeq?: number } | null;
+      if (body && typeof body.groupSeq === 'number') {
+        grp.lastSeq = Math.max(grp.lastSeq, body.groupSeq);
+        await saveVault(vault);
+      }
+      return true;
+    }
+    return false;
+  }
+  return false;
+}
+
+async function syncAliasesWithOwnDevicesIfNeeded(
+  forceSend = false,
+  removedPins: string[] = [],
+): Promise<void> {
+  if (!vault || pinAliasSyncInFlight) return;
+  pinAliasSyncInFlight = true;
+
+  try {
+    await hydrateLocalAliasesFromVaultContacts(vault);
+    const localAliases = await mergeLocalAliasesIntoVaultContacts(vault);
+
+    const devList = await api.listDevices(vault);
+    const activeSiblingIds = devList.devices
+      .filter((d) => !d.isCurrent && d.status === 'active')
+      .map((d) => d.deviceId);
+
+    if (activeSiblingIds.length === 0) return;
+
+    const cleanAliases: Record<string, string> = {};
+    for (const [k, v] of Object.entries(localAliases)) {
+      const compact = normalizePinCompactSync(k);
+      const val = v.trim();
+      if (compact.length === 8 && val) {
+        cleanAliases[compact] = val;
+      }
+    }
+
+    // Si este dispositivo no tiene alias todavía y no hubo edición manual, no crear grupo vacío
+    if (!forceSend && Object.keys(cleanAliases).length === 0 && removedPins.length === 0) {
+      return;
+    }
+
+    const nextHash = computeAliasSyncHash(cleanAliases, activeSiblingIds);
+    const prevHash = localStorage.getItem(PIN_ALIAS_SYNC_HASH_KEY) ?? '';
+    if (!forceSend && nextHash === prevHash) {
+      return;
+    }
+
+    const selfGrp = await ensureSelfSyncGroup(activeSiblingIds);
+    if (!selfGrp) return;
+
+    const payload = JSON.stringify({
+      __pin_alias_sync: 1,
+      updatedAt: Date.now(),
+      aliases: cleanAliases,
+      ...(removedPins.length > 0 ? { removed: removedPins } : {}),
+    });
+
+    const sent = await sendAliasSyncEnvelope(selfGrp, payload);
+    if (sent) {
+      try {
+        localStorage.setItem(PIN_ALIAS_SYNC_HASH_KEY, nextHash);
+      } catch {
+        // Ignorado
+      }
+    }
+  } catch (err) {
+    console.warn('Aviso sincronizando alias E2EE:', err);
+  } finally {
+    pinAliasSyncInFlight = false;
+  }
+}
+
+async function tryHandleIncomingAliasSync(grp: VaultGroup, rawText: string): Promise<boolean> {
+  if (!vault || !rawText || !rawText.includes('"__pin_alias_sync"')) return false;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(rawText);
+  } catch {
+    return false;
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return false;
+  const rec = parsed as Record<string, unknown>;
+  if (rec['__pin_alias_sync'] !== 1) return false;
+
+  // Etiquetar definitivamente este grupo como canal oculto entre dispositivos propios
+  grp.peerPin = vault.pin;
+  if (activeGroupIdB64 === grp.groupIdB64) {
+    activeGroupIdB64 = null;
+  }
+
+  const incomingUpdatedAt =
+    typeof rec['updatedAt'] === 'number' && Number.isFinite(rec['updatedAt'])
+      ? rec['updatedAt']
+      : Date.now();
+
+  const rawAliases =
+    rec['aliases'] && typeof rec['aliases'] === 'object' && !Array.isArray(rec['aliases'])
+      ? (rec['aliases'] as Record<string, unknown>)
+      : {};
+  const rawRemoved = Array.isArray(rec['removed'])
+    ? rec['removed'].filter((x): x is string => typeof x === 'string')
+    : [];
+
+  const updatesToApply: Record<string, string> = {};
+  const removalsToApply: string[] = [];
+
+  for (const [rawPin, rawVal] of Object.entries(rawAliases)) {
+    if (typeof rawVal !== 'string') continue;
+    const compactPin = normalizePinCompactSync(rawPin);
+    const cleanAlias = rawVal.trim();
+    if (compactPin.length !== 8 || !cleanAlias) continue;
+
+    const existing = vault.contacts.find((c) => normalizePinCompactSync(c.pin) === compactPin);
+    if (existing) {
+      if (!existing.alias_local || incomingUpdatedAt >= (existing.updated_at || 0)) {
+        existing.alias_local = cleanAlias;
+        existing.updated_at = incomingUpdatedAt;
+        updatesToApply[compactPin] = cleanAlias;
+      }
+    } else {
+      vault.contacts.push({
+        pin: compactPin,
+        pk_root_b64: '',
+        trust_state: 'tofu',
+        alias_local: cleanAlias,
+        updated_at: incomingUpdatedAt,
+      });
+      updatesToApply[compactPin] = cleanAlias;
+    }
+  }
+
+  for (const rawPin of rawRemoved) {
+    const compactPin = normalizePinCompactSync(rawPin);
+    if (compactPin.length !== 8) continue;
+    const existing = vault.contacts.find((c) => normalizePinCompactSync(c.pin) === compactPin);
+    if (!existing || incomingUpdatedAt >= (existing.updated_at || 0)) {
+      if (existing) {
+        existing.alias_local = null;
+        existing.updated_at = incomingUpdatedAt;
+      }
+      removalsToApply.push(compactPin);
+    }
+  }
+
+  const mergedAliases = await applySyncedPinAliases(updatesToApply, removalsToApply);
+
+  try {
+    const devList = await api.listDevices(vault);
+    const activeSiblingIds = devList.devices
+      .filter((d) => !d.isCurrent && d.status === 'active')
+      .map((d) => d.deviceId);
+    localStorage.setItem(
+      PIN_ALIAS_SYNC_HASH_KEY,
+      computeAliasSyncHash(mergedAliases, activeSiblingIds),
+    );
+  } catch {
+    // Ignorado
+  }
+
+  return true;
+}
+
+window.addEventListener('pin:aliases-updated', (ev: Event) => {
+  const detail = (
+    ev as CustomEvent<{
+      aliases?: Record<string, string>;
+      source?: string;
+      changedPin?: string;
+      changedAlias?: string;
+    }>
+  ).detail;
+
+  if (!vault || !detail || detail.source !== 'local') return;
+
+  const changedPin = detail.changedPin ? normalizePinCompactSync(detail.changedPin) : '';
+  const changedAlias = (detail.changedAlias ?? '').trim();
+  const removedPins: string[] = [];
+
+  if (changedPin.length === 8) {
+    const existing = vault.contacts.find((c) => normalizePinCompactSync(c.pin) === changedPin);
+    const now = Date.now();
+    if (!changedAlias) {
+      removedPins.push(changedPin);
+      if (existing) {
+        existing.alias_local = null;
+        existing.updated_at = now;
+      }
+    } else if (existing) {
+      existing.alias_local = changedAlias;
+      existing.updated_at = now;
+    } else {
+      vault.contacts.push({
+        pin: changedPin,
+        pk_root_b64: '',
+        trust_state: 'tofu',
+        alias_local: changedAlias,
+        updated_at: now,
+      });
+    }
+    void saveVault(vault);
+  }
+
+  void syncAliasesWithOwnDevicesIfNeeded(true, removedPins);
+});
+/* === PIN_E2EE_ALIAS_SYNC_END === */

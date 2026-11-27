@@ -100,7 +100,7 @@ export async function loadPinAliases(): Promise<PinAliasMap> {
 export async function setPinAlias(pin: string, alias: string): Promise<PinAliasMap> {
   const next = await setPinAliasRaw(pin, alias);
   if (typeof window !== 'undefined') {
-    window.dispatchEvent(new CustomEvent('pin:aliases-updated', { detail: { aliases: next } }));
+    window.dispatchEvent(new CustomEvent('pin:aliases-updated', { detail: { aliases: next, source: 'local', changedPin: normalizePinKey(pin), changedAlias: alias.trim() } }));
   }
   return next;
 }
@@ -147,4 +147,40 @@ export async function saveUiPreferences(prefs: UiPreferences): Promise<void> {
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);
   });
+}
+
+export async function applySyncedPinAliases(
+  updates: Record<string, string>,
+  removedPins: string[] = [],
+): Promise<PinAliasMap> {
+  const db = await openDb();
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(ALIAS_STORE, 'readwrite');
+    const store = tx.objectStore(ALIAS_STORE);
+    for (const rawPin of removedPins) {
+      const cleanPin = normalizePinKey(rawPin);
+      if (cleanPin) store.delete(cleanPin);
+    }
+    for (const [rawPin, rawAlias] of Object.entries(updates)) {
+      const cleanPin = normalizePinKey(rawPin);
+      const cleanAlias = rawAlias.trim();
+      if (!cleanPin) continue;
+      if (!cleanAlias) {
+        store.delete(cleanPin);
+      } else {
+        store.put(cleanAlias, cleanPin);
+      }
+    }
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+  const next = await loadPinAliases();
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(
+      new CustomEvent('pin:aliases-updated', {
+        detail: { aliases: next, source: 'remote-sync' },
+      }),
+    );
+  }
+  return next;
 }
