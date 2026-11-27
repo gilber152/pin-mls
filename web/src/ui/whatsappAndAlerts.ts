@@ -1638,7 +1638,7 @@ class SoundAndNotificationController {
       if (
         btn.id === 'pin-btn-edit-alias' ||
         btn.id === 'btn-search-saved-contacts' ||
-        btn.id === 'btn-voice-record'
+        btn.id === 'btn-voice-record' || btn.id === 'btn-start-voice-call' || Boolean(btn.closest('#pin-call-overlay'))
       ) {
         return;
       }
@@ -1957,6 +1957,7 @@ class SoundAndNotificationController {
       this.installContactsSearchButton();
       this.bindSwipeToReply();
       this.installVoiceControls();
+      window.dispatchEvent(new CustomEvent('pin:sync-call-button'));
       this.renderReplyBanner();
       document.querySelectorAll<HTMLElement>('.msg-bubble').forEach((el) => {
         this.sanitizeBubbleNode(el);

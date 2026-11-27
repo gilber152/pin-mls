@@ -1,3 +1,4 @@
+import { VoiceCallController, isVoiceCallSignalText } from './call/voiceCall.js';
 import { ensureWebPushSubscribed, registerAppServiceWorker, unsubscribeWebPush } from './net/webPush.js';
 import { applyWhatsAppLayoutClasses, waAlerts } from './ui/whatsappAndAlerts.js';
 import type { VaultGroup, VaultState } from './types.js';
@@ -1149,6 +1150,19 @@ async function syncNow(): Promise<void> {
               dirty = true;
               continue;
             }
+            if (isVoiceCallSignalText(parsed.text)) {
+              void voiceCallController.handleIncomingSignal({
+                groupIdB64: grp.groupIdB64,
+                peerPin: grp.peerPin,
+                senderPin: outcome.senderPin,
+                senderDeviceId: outcome.senderDeviceId,
+                ownPin: vault.pin,
+                ownDeviceId: vault.deviceId,
+                sentAtMs: parsed.sentAtMs,
+                rawText: parsed.text,
+              });
+              continue;
+            }
             grp.messages.push({
               groupSeq: env.groupSeq,
               senderPin: outcome.senderPin,
@@ -2138,3 +2152,35 @@ document.addEventListener(
   true,
 );
 /* === PIN_WEBPUSH_CLIENT_END === */
+
+/* === PIN_VOICE_CALL_CLIENT_START === */
+const voiceCallController = new VoiceCallController({
+  getActiveChat: () => {
+    if (!vault || !activeGroupIdB64) return null;
+    const grp = vault.groups[activeGroupIdB64];
+    if (!grp || isSelfSyncGroup(grp, vault.pin)) return null;
+    const formatted = formatPin(grp.peerPin);
+    const alias = waAlerts.getAliasForPin(formatted);
+    return {
+      groupIdB64: grp.groupIdB64,
+      peerPin: grp.peerPin,
+      displayName: alias ? `${alias} (${formatted})` : formatted,
+      active: grp.active,
+    };
+  },
+  getDisplayNameForPin: (peerPin: string) => {
+    const formatted = formatPin(peerPin);
+    const alias = waAlerts.getAliasForPin(formatted);
+    return alias ? `${alias} (${formatted})` : formatted;
+  },
+  sendEncryptedSignal: async (groupIdB64: string, signalJson: string) => {
+    if (!vault) return false;
+    const grp = vault.groups[groupIdB64];
+    if (!grp || !grp.active) return false;
+    return sendAliasSyncEnvelope(grp, signalJson);
+  },
+  onStatus: (msg: string) => {
+    setGlobalStatus(msg);
+  },
+});
+/* === PIN_VOICE_CALL_CLIENT_END === */
