@@ -1075,7 +1075,7 @@ class SoundAndNotificationController {
       window.addEventListener('resize', () => {
         syncVisualViewport();
         if (!this.isMobileViewport()) {
-          document.body.classList.remove('pin-mobile-chat-open', 'pin-mobile-menu-open');
+          document.body.classList.remove('pin-mobile-chat-open');
           this.syncMobileMenuButtonLabel();
         }
       });

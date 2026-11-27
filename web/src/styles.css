@@ -2539,3 +2539,75 @@ button[aria-label*="audio" i] {
   visibility: hidden !important;
 }
 /* === PIN_INVITES_AUTO_HIDE_END === */
+/* === PIN_DESKTOP_MOBILE_PARITY_START === */
+@media (min-width: 861px) {
+  /* Mostrar botón ☰ Menú también en versión web */
+  #btn-mobile-menu-toggle.pin-mobile-only-btn {
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 6px !important;
+    padding: 8px 14px !important;
+    border-radius: 10px !important;
+    background: #1d4ed8 !important;
+    color: #ffffff !important;
+    -webkit-text-fill-color: #ffffff !important;
+    border: 1px solid #3b82f6 !important;
+    font-weight: 700 !important;
+    font-size: 0.88rem !important;
+    cursor: pointer !important;
+    flex-shrink: 0 !important;
+  }
+
+  /* Mantener cabecera principal ordenada y con espacio para desplegar acciones */
+  [data-pin-mobile-main-header="true"] {
+    display: flex !important;
+    flex-wrap: wrap !important;
+    align-items: center !important;
+    gap: 10px !important;
+  }
+
+  #btn-search-saved-contacts {
+    margin-left: auto !important;
+  }
+
+  /* Ocultar barras externas y botones secundarios hasta pulsar ☰ Menú (y siempre en onboarding) */
+  body.pin-onboarding-visible [data-pin-mobile-collapsible="true"],
+  body.pin-onboarding-visible [data-pin-mobile-actions-group="true"],
+  body:not(.pin-mobile-menu-open) [data-pin-mobile-collapsible="true"],
+  body:not(.pin-mobile-menu-open) [data-pin-mobile-actions-group="true"] {
+    display: none !important;
+  }
+
+  /* Al abrir ☰ Menú en web: mostrar botones secundarios en una fila limpia bajo la cabecera */
+  body.pin-mobile-menu-open:not(.pin-onboarding-visible) [data-pin-mobile-actions-group="true"] {
+    display: flex !important;
+    flex-wrap: wrap !important;
+    align-items: center !important;
+    gap: 8px !important;
+    flex: 1 0 100% !important;
+    order: 99 !important;
+    padding-top: 10px !important;
+    margin-top: 4px !important;
+    border-top: 1px solid rgba(148, 163, 184, 0.25) !important;
+  }
+
+  /* Al abrir ☰ Menú en web: mostrar barras de Alias PIN, notificaciones e invitar grupo */
+  body.pin-mobile-menu-open:not(.pin-onboarding-visible) [data-pin-mobile-collapsible="true"] {
+    display: flex !important;
+    flex-wrap: wrap !important;
+    align-items: center !important;
+    gap: 8px !important;
+    padding: 8px 14px !important;
+    background: #0f2240 !important;
+    border-bottom: 1px solid #1e3a8a !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+  }
+
+  body.pin-mobile-menu-open:not(.pin-onboarding-visible) [data-pin-mobile-collapsible="true"] input {
+    flex: 1 1 260px !important;
+    min-width: 0 !important;
+  }
+}
+/* === PIN_DESKTOP_MOBILE_PARITY_END === */
