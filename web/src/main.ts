@@ -924,7 +924,13 @@ async function respondInvite(
         : `Invitación de ${formatPin(senderPin)} rechazada (cooldown 30 días).`,
     );
   } catch (err) {
-    setGlobalStatus(`Error respondiendo invitación: ${(err as Error).message}`);
+    const errMsg = err instanceof Error ? err.message : String(err);
+    if (errMsg.includes('CONTACT_REQUEST_NOT_FOUND') || errMsg.includes('HTTP 404')) {
+      setGlobalStatus('Esta solicitud ya fue procesada o expiró. Actualizando lista...');
+      document.getElementById('btn-sync-now')?.click();
+    } else {
+      setGlobalStatus(`Error respondiendo invitación: ${(err as Error).message}`);
+    }
   }
 }
 
