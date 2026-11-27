@@ -509,7 +509,7 @@ class SoundAndNotificationController {
   }
 
   setPreferences(opts: { soundEnabled?: boolean; desktopNotifEnabled?: boolean }): void {
-    if (typeof opts.soundEnabled === 'boolean') this.soundEnabled = opts.soundEnabled;
+    this.soundEnabled = true;
     if (typeof opts.desktopNotifEnabled === 'boolean') {
       this.desktopNotifEnabled = opts.desktopNotifEnabled;
     }
@@ -536,7 +536,7 @@ class SoundAndNotificationController {
         osc.frequency.setValueAtTime(n.freq, now + n.start);
 
         gain.gain.setValueAtTime(0.0001, now + n.start);
-        gain.gain.exponentialRampToValueAtTime(0.14, now + n.start + 0.015);
+        gain.gain.exponentialRampToValueAtTime(0.28, now + n.start + 0.015);
         gain.gain.exponentialRampToValueAtTime(0.0001, now + n.start + n.duration);
 
         osc.connect(gain);
@@ -1040,6 +1040,61 @@ class SoundAndNotificationController {
     }
   }
 
+  private hideDisabledControls(): void {
+    if (typeof document === 'undefined') return;
+
+    // 1. Ocultar caja "Buscar localmente en mensajes o PINs..." y su botón de limpiar (×)
+    document
+      .querySelectorAll<HTMLInputElement>(
+        'input[placeholder*="Buscar localmente" i], input[placeholder*="mensajes o PINs" i]'
+      )
+      .forEach((inp) => {
+        inp.setAttribute('data-pin-force-hidden', 'true');
+        const next = inp.nextElementSibling as HTMLElement | null;
+        if (
+          next &&
+          next.tagName === 'BUTTON' &&
+          next.id !== 'pin-btn-edit-alias' &&
+          next.id !== 'btn-search-saved-contacts'
+        ) {
+          const t = (next.textContent || '').trim();
+          const title = (next.getAttribute('title') || next.getAttribute('aria-label') || '').toLowerCase();
+          if (t === '×' || t === '✕' || t.toLowerCase() === 'x' || title.includes('limpiar') || title.includes('clear')) {
+            next.setAttribute('data-pin-force-hidden', 'true');
+          }
+        }
+      });
+
+    // 2. Ocultar botones/iconos de sonido (altavoz / volumen / mute)
+    document.querySelectorAll<HTMLElement>('button').forEach((btn) => {
+      if (btn.id === 'pin-btn-edit-alias' || btn.id === 'btn-search-saved-contacts') return;
+      const meta = [
+        btn.id,
+        btn.className,
+        btn.getAttribute('title') || '',
+        btn.getAttribute('aria-label') || '',
+        btn.textContent || '',
+      ]
+        .join(' ')
+        .toLowerCase();
+
+      if (
+        /sonido|sound|audio|volumen|volume|mute|silenciar|🔊|🔇|🔉|🔈/.test(meta)
+      ) {
+        btn.setAttribute('data-pin-force-hidden', 'true');
+      }
+    });
+
+    // 3. Ocultar el texto verde "Sesión lista (presencia local)"
+    document.querySelectorAll<HTMLElement>('span, div, small, p').forEach((el) => {
+      if (el.children.length > 0) return;
+      const txt = (el.textContent || '').trim();
+      if (/sesi[oó]ns+listas*(s*presencias+locals*)/i.test(txt)) {
+        el.setAttribute('data-pin-force-hidden', 'true');
+      }
+    });
+  }
+
   syncAllViews(): void {
     if (typeof document === 'undefined' || this.syncingUi) return;
     this.syncingUi = true;
@@ -1048,6 +1103,7 @@ class SoundAndNotificationController {
       this.syncInvitesVisibility();
       this.sanitizeChatListPreviews();
       this.cleanEpochAndStatusLabels();
+      this.hideDisabledControls();
       this.installContactsSearchButton();
       document.querySelectorAll<HTMLElement>('.msg-bubble').forEach((el) => {
         this.sanitizeBubbleNode(el);

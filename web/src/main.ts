@@ -1,6 +1,7 @@
 import { applyWhatsAppLayoutClasses, waAlerts } from './ui/whatsappAndAlerts.js';
 import type { VaultGroup, VaultState } from './types.js';
 import { loadVault, saveVault, wipeVault, setPinAlias } from './storage/vaultDb.js';
+import { archiveMessagesForPin } from './storage/pinGroupConsolidator.js';
 import { CryptoWorkerClient, type StartedLinkSessionDto } from './worker/workerClient.js';
 import {
   API_BASE,
@@ -1464,6 +1465,9 @@ window.addEventListener('pin:delete-contact', (ev: Event) => {
       const matchId = Boolean(groupIdB64 && gid === groupIdB64);
       const matchPin = Boolean(compactPin && groupMatchesPin(grp, compactPin));
       if (matchId || matchPin) {
+        if (rawPin && Array.isArray((grp as { messages?: unknown[] }).messages)) {
+          archiveMessagesForPin(rawPin, (grp as { messages: unknown[] }).messages);
+        }
         delete vault.groups[gid];
         removedIds.push(gid);
       }
@@ -1616,3 +1620,10 @@ void initStep4GroupsAndPresence({
     bootWa();
   }
 })();
+
+window.addEventListener('pin:groups-consolidated', (ev: Event) => {
+  const redirects = (ev as CustomEvent<{ redirects?: Record<string, string> }>).detail?.redirects;
+  if (redirects && activeGroupIdB64 && redirects[activeGroupIdB64]) {
+    activeGroupIdB64 = redirects[activeGroupIdB64] ?? activeGroupIdB64;
+  }
+});

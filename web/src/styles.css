@@ -2280,3 +2280,19 @@ body.pin-mobile-chat-open #messages-list {
   }
 }
 /* === PIN_CHAT_POLISH_END === */
+/* === PIN_HIDE_SEARCH_SOUND_PRESENCE_START === */
+[data-pin-force-hidden="true"],
+input[placeholder*="Buscar localmente" i],
+input[placeholder*="mensajes o PINs" i],
+#pin-btn-sound,
+#pin-btn-toggle-sound,
+#btn-toggle-sound,
+button[id*="sound" i],
+button[title*="sonido" i],
+button[aria-label*="sonido" i],
+button[title*="audio" i],
+button[aria-label*="audio" i] {
+  display: none !important;
+  visibility: hidden !important;
+}
+/* === PIN_HIDE_SEARCH_SOUND_PRESENCE_END === */

@@ -1,3 +1,4 @@
+/* PIN_DOUBLE_VOLUME_APPLIED */
 import {
   loadPinAliases,
   loadUiPreferences,
@@ -33,7 +34,7 @@ function playSoftTone(enabled: boolean): void {
     osc.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.09);
 
     gain.gain.setValueAtTime(0.001, ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.05, ctx.currentTime + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.1, ctx.currentTime + 0.02);
     gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.16);
 
     osc.connect(gain);

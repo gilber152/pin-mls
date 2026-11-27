@@ -1,3 +1,4 @@
+import { consolidateVaultGroupsByPin, clearArchivedPinHistory } from './pinGroupConsolidator.js';
 import type { VaultState } from '../types.js';
 
 const DB_NAME = 'pin_mls_web_vault_v1';
@@ -32,6 +33,11 @@ function openDb(): Promise<IDBDatabase> {
 }
 
 export async function loadVault(): Promise<VaultState | null> {
+  const loaded = await loadVaultRaw();
+  return consolidateVaultGroupsByPin(loaded);
+}
+
+async function loadVaultRaw(): Promise<VaultState | null> {
   const db = await openDb();
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, 'readonly');
@@ -42,6 +48,7 @@ export async function loadVault(): Promise<VaultState | null> {
 }
 
 export async function saveVault(state: VaultState): Promise<void> {
+  consolidateVaultGroupsByPin(state);
   const db = await openDb();
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, 'readwrite');
@@ -52,6 +59,7 @@ export async function saveVault(state: VaultState): Promise<void> {
 }
 
 export async function wipeVault(): Promise<void> {
+  clearArchivedPinHistory();
   const db = await openDb();
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, 'readwrite');
