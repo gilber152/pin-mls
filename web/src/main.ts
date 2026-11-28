@@ -2184,3 +2184,26 @@ const voiceCallController = new VoiceCallController({
   },
 });
 /* === PIN_VOICE_CALL_CLIENT_END === */
+
+/* === PIN_VOICE_SEND_LISTENER_START === */
+window.addEventListener('pin:send-raw-payload', (ev: Event) => {
+  const payload = (ev as CustomEvent<{ payload?: string }>).detail?.payload;
+  if (typeof payload !== 'string' || !payload.trim()) return;
+  if (!vault || !activeGroupIdB64) {
+    setGlobalStatus('Abre una conversación activa para enviar la nota de voz.');
+    return;
+  }
+  if (payload.length > 480_000) {
+    setGlobalStatus('La nota de voz es demasiado larga para el límite de 512 KB. Graba un audio más corto.');
+    return;
+  }
+  void (async () => {
+    try {
+      setGlobalStatus('Enviando nota de voz cifrada…');
+      await sendMessage(payload);
+    } catch (err) {
+      setGlobalStatus(`Error enviando nota de voz: ${(err as Error).message}`);
+    }
+  })();
+});
+/* === PIN_VOICE_SEND_LISTENER_END === */

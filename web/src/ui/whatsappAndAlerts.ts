@@ -1638,7 +1638,7 @@ class SoundAndNotificationController {
       if (
         btn.id === 'pin-btn-edit-alias' ||
         btn.id === 'btn-search-saved-contacts' ||
-        btn.id === 'btn-voice-record' || btn.id === 'btn-start-voice-call' || Boolean(btn.closest('#pin-call-overlay'))
+        btn.id === 'btn-voice-record' || Boolean(btn.closest('#pin-voice-bar')) || btn.id === 'btn-start-voice-call' || Boolean(btn.closest('#pin-call-overlay'))
       ) {
         return;
       }
