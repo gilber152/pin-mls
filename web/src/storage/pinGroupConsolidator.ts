@@ -1,5 +1,6 @@
 const PIN_HISTORY_STORAGE_KEY = 'pin_mls_pin_history_v1';
 const GROUP_FIRST_SEEN_KEY = 'pin_mls_group_first_seen_v1';
+const PIN_DELETED_MSGS_STORAGE_KEY = 'pin_mls_deleted_msgs_v1';
 
 type AnyRecord = Record<string, unknown>;
 
@@ -9,6 +10,15 @@ interface StoredPinHistory {
 
 interface FirstSeenMap {
   [groupIdB64: string]: number;
+}
+
+interface DeletedPinBucket {
+  keys: string[];
+  seqs: string[];
+}
+
+interface StoredDeletedMessages {
+  [canonicalPin: string]: DeletedPinBucket;
 }
 
 function normalizeCompact(pin: string): string {
@@ -35,6 +45,25 @@ function extractCleanMessageText(rawText: string): string {
   return trimmed;
 }
 
+function parseControlDeleteSeq(rawText: string): number | null {
+  const trimmed = rawText.trim();
+  if (!trimmed.startsWith('{') || !trimmed.includes('__pin_msg_delete')) return null;
+  try {
+    const obj = JSON.parse(trimmed) as { __pin_msg_delete?: unknown; targetSeq?: unknown };
+    if (
+      obj.__pin_msg_delete === 1 &&
+      typeof obj.targetSeq === 'number' &&
+      Number.isInteger(obj.targetSeq) &&
+      obj.targetSeq > 0
+    ) {
+      return obj.targetSeq;
+    }
+  } catch {
+    // No es señal de control
+  }
+  return null;
+}
+
 function loadJsonStorage<T>(key: string, fallback: T): T {
   if (typeof window === 'undefined') return fallback;
   try {
@@ -59,11 +88,25 @@ function saveJsonStorage(key: string, value: unknown): void {
   }
 }
 
+function getOrCreateDeletedBucket(
+  store: StoredDeletedMessages,
+  canonicalPin: string,
+): DeletedPinBucket {
+  const existing = store[canonicalPin];
+  if (existing && Array.isArray(existing.keys) && Array.isArray(existing.seqs)) {
+    return existing;
+  }
+  const fresh: DeletedPinBucket = { keys: [], seqs: [] };
+  store[canonicalPin] = fresh;
+  return fresh;
+}
+
 export function clearArchivedPinHistory(): void {
   if (typeof window === 'undefined') return;
   try {
     window.localStorage.removeItem(PIN_HISTORY_STORAGE_KEY);
     window.localStorage.removeItem(GROUP_FIRST_SEEN_KEY);
+    window.localStorage.removeItem(PIN_DELETED_MSGS_STORAGE_KEY);
   } catch {
     // Ignorado
   }
@@ -115,6 +158,66 @@ function buildMessageDedupKey(msg: AnyRecord): string {
   return `sig:${mine}|${sender}|${ts}|${cleanText}`;
 }
 
+function buildSeqToken(senderPin: string, seq: number): string {
+  return `${normalizeCompact(senderPin)}:${seq}`;
+}
+
+function filterMessagesAgainstDeleted(
+  canonicalPin: string,
+  messages: AnyRecord[],
+  deletedStore: StoredDeletedMessages,
+): { filtered: AnyRecord[]; deletedDirty: boolean } {
+  const bucket = getOrCreateDeletedBucket(deletedStore, canonicalPin);
+  const keySet = new Set(bucket.keys);
+  const seqSet = new Set(bucket.seqs);
+  let deletedDirty = false;
+
+  // 1. Absorber cualquier sobre de control __pin_msg_delete presente en los mensajes
+  for (const msg of messages) {
+    const rawText = typeof msg['text'] === 'string' ? msg['text'] : '';
+    const targetSeq = parseControlDeleteSeq(rawText);
+    if (targetSeq === null) continue;
+    const sender = typeof msg['senderPin'] === 'string' ? msg['senderPin'] : '';
+    const token = buildSeqToken(sender, targetSeq);
+    if (normalizeCompact(sender) && !seqSet.has(token)) {
+      seqSet.add(token);
+      bucket.seqs.push(token);
+      deletedDirty = true;
+    }
+    if (msg['mine'] === true) {
+      const mineToken = `mine:${targetSeq}`;
+      if (!seqSet.has(mineToken)) {
+        seqSet.add(mineToken);
+        bucket.seqs.push(mineToken);
+        deletedDirty = true;
+      }
+    }
+  }
+
+  // 2. Descartar señales de control y mensajes marcados como eliminados
+  const filtered = messages.filter((msg) => {
+    const rawText = typeof msg['text'] === 'string' ? msg['text'] : '';
+    if (parseControlDeleteSeq(rawText) !== null) return false;
+
+    const dedupKey = buildMessageDedupKey(msg);
+    if (keySet.has(dedupKey)) return false;
+
+    const seq = getMessageSeq(msg);
+    if (seq > 0) {
+      const sender = typeof msg['senderPin'] === 'string' ? msg['senderPin'] : '';
+      if (normalizeCompact(sender) && seqSet.has(buildSeqToken(sender, seq))) {
+        return false;
+      }
+      if (msg['mine'] === true && seqSet.has(`mine:${seq}`)) {
+        return false;
+      }
+    }
+    return true;
+  });
+
+  return { filtered, deletedDirty };
+}
+
 function mergeMessageArrays(lists: AnyRecord[][]): AnyRecord[] {
   const byKey = new Map<string, AnyRecord>();
   for (const list of lists) {
@@ -133,17 +236,95 @@ function mergeMessageArrays(lists: AnyRecord[][]): AnyRecord[] {
   });
 }
 
+export function markMessageDeletedForPin(
+  pin: string,
+  msg: Record<string, unknown>,
+  alsoBySeq = false,
+): void {
+  const canonical = toCanonicalPin(pin);
+  if (!canonical || !msg || typeof msg !== 'object') return;
+
+  const deletedStore = loadJsonStorage<StoredDeletedMessages>(PIN_DELETED_MSGS_STORAGE_KEY, {});
+  const bucket = getOrCreateDeletedBucket(deletedStore, canonical);
+
+  const dedupKey = buildMessageDedupKey(msg);
+  if (!bucket.keys.includes(dedupKey)) {
+    bucket.keys.push(dedupKey);
+  }
+
+  if (alsoBySeq) {
+    const seq = getMessageSeq(msg);
+    if (seq > 0) {
+      const sender = typeof msg['senderPin'] === 'string' ? msg['senderPin'] : '';
+      const token = buildSeqToken(sender, seq);
+      if (normalizeCompact(sender) && !bucket.seqs.includes(token)) {
+        bucket.seqs.push(token);
+      }
+      if (msg['mine'] === true) {
+        const mineToken = `mine:${seq}`;
+        if (!bucket.seqs.includes(mineToken)) {
+          bucket.seqs.push(mineToken);
+        }
+      }
+    }
+  }
+
+  saveJsonStorage(PIN_DELETED_MSGS_STORAGE_KEY, deletedStore);
+
+  const historyStore = loadJsonStorage<StoredPinHistory>(PIN_HISTORY_STORAGE_KEY, {});
+  if (Array.isArray(historyStore[canonical])) {
+    const { filtered } = filterMessagesAgainstDeleted(canonical, historyStore[canonical], deletedStore);
+    historyStore[canonical] = filtered;
+    saveJsonStorage(PIN_HISTORY_STORAGE_KEY, historyStore);
+  }
+}
+
+export function markSeqDeletedForPin(
+  pin: string,
+  senderPin: string,
+  groupSeq: number,
+  isMine = false,
+): void {
+  const canonical = toCanonicalPin(pin);
+  if (!canonical || !Number.isInteger(groupSeq) || groupSeq <= 0) return;
+
+  const deletedStore = loadJsonStorage<StoredDeletedMessages>(PIN_DELETED_MSGS_STORAGE_KEY, {});
+  const bucket = getOrCreateDeletedBucket(deletedStore, canonical);
+  const token = buildSeqToken(senderPin, groupSeq);
+  if (normalizeCompact(senderPin) && !bucket.seqs.includes(token)) {
+    bucket.seqs.push(token);
+  }
+  if (isMine) {
+    const mineToken = `mine:${groupSeq}`;
+    if (!bucket.seqs.includes(mineToken)) {
+      bucket.seqs.push(mineToken);
+    }
+  }
+  saveJsonStorage(PIN_DELETED_MSGS_STORAGE_KEY, deletedStore);
+
+  const historyStore = loadJsonStorage<StoredPinHistory>(PIN_HISTORY_STORAGE_KEY, {});
+  if (Array.isArray(historyStore[canonical])) {
+    const { filtered } = filterMessagesAgainstDeleted(canonical, historyStore[canonical], deletedStore);
+    historyStore[canonical] = filtered;
+    saveJsonStorage(PIN_HISTORY_STORAGE_KEY, historyStore);
+  }
+}
+
 export function archiveMessagesForPin(pin: string, messages: unknown[]): void {
   const canonical = toCanonicalPin(pin);
   if (!canonical || !Array.isArray(messages) || messages.length === 0) return;
   const store = loadJsonStorage<StoredPinHistory>(PIN_HISTORY_STORAGE_KEY, {});
+  const deletedStore = loadJsonStorage<StoredDeletedMessages>(PIN_DELETED_MSGS_STORAGE_KEY, {});
   const prev = Array.isArray(store[canonical]) ? store[canonical] : [];
   const incoming = messages.filter(
     (m): m is AnyRecord => Boolean(m && typeof m === 'object')
   );
   if (incoming.length === 0) return;
-  store[canonical] = mergeMessageArrays([prev, incoming]);
+  const merged = mergeMessageArrays([prev, incoming]);
+  const { filtered, deletedDirty } = filterMessagesAgainstDeleted(canonical, merged, deletedStore);
+  store[canonical] = filtered;
   saveJsonStorage(PIN_HISTORY_STORAGE_KEY, store);
+  if (deletedDirty) saveJsonStorage(PIN_DELETED_MSGS_STORAGE_KEY, deletedStore);
 }
 
 export function consolidateVaultGroupsByPin<T>(state: T | null): T | null {
@@ -191,7 +372,9 @@ export function consolidateVaultGroupsByPin<T>(state: T | null): T | null {
   }
 
   const historyStore = loadJsonStorage<StoredPinHistory>(PIN_HISTORY_STORAGE_KEY, {});
+  const deletedStore = loadJsonStorage<StoredDeletedMessages>(PIN_DELETED_MSGS_STORAGE_KEY, {});
   let historyDirty = false;
+  let deletedDirty = false;
   const keysToRemove = new Set<string>();
   const redirects: Record<string, string> = {};
 
@@ -244,21 +427,22 @@ export function consolidateVaultGroupsByPin<T>(state: T | null): T | null {
       }
     }
 
-    const merged = mergeMessageArrays(messageBuckets);
+    const mergedRaw = mergeMessageArrays(messageBuckets);
+    const cleaned = filterMessagesAgainstDeleted(peerPin, mergedRaw, deletedStore);
+    if (cleaned.deletedDirty) deletedDirty = true;
+    const merged = cleaned.filtered;
     winner.grp['messages'] = merged;
 
-    if (merged.length > 0) {
-      const prevLast = archived[archived.length - 1];
-      const nextLast = merged[merged.length - 1];
-      if (
-        merged.length !== archived.length ||
-        !prevLast ||
-        !nextLast ||
-        buildMessageDedupKey(prevLast) !== buildMessageDedupKey(nextLast)
-      ) {
-        historyStore[peerPin] = merged;
-        historyDirty = true;
-      }
+    const prevLast = archived[archived.length - 1];
+    const nextLast = merged[merged.length - 1];
+    if (
+      merged.length !== archived.length ||
+      (prevLast && !nextLast) ||
+      (!prevLast && nextLast) ||
+      (prevLast && nextLast && buildMessageDedupKey(prevLast) !== buildMessageDedupKey(nextLast))
+    ) {
+      historyStore[peerPin] = merged;
+      historyDirty = true;
     }
   }
 
@@ -272,6 +456,7 @@ export function consolidateVaultGroupsByPin<T>(state: T | null): T | null {
     }
   }
 
+  if (deletedDirty) saveJsonStorage(PIN_DELETED_MSGS_STORAGE_KEY, deletedStore);
   if (historyDirty) saveJsonStorage(PIN_HISTORY_STORAGE_KEY, historyStore);
   if (firstSeenDirty) saveJsonStorage(GROUP_FIRST_SEEN_KEY, firstSeen);
 

@@ -1,4 +1,4 @@
-import { consolidateVaultGroupsByPin, clearArchivedPinHistory } from './pinGroupConsolidator.js';
+import { consolidateVaultGroupsByPin, clearArchivedPinHistory, markSeqDeletedForPin } from './pinGroupConsolidator.js';
 import type { VaultState } from '../types.js';
 
 const DB_NAME = 'pin_mls_web_vault_v1';
@@ -82,6 +82,9 @@ function purgeControlDeleteMessagesFromVault(state: VaultState | null): boolean 
       if (typeof msg.text !== 'string') continue;
       const targetSeq = parseControlDeleteSeq(msg.text);
       if (targetSeq !== null) {
+        if (typeof grp.peerPin === 'string' && grp.peerPin.trim()) {
+          markSeqDeletedForPin(grp.peerPin, msg.senderPin || '', targetSeq, Boolean(msg.mine));
+        }
         deletions.push({
           targetSeq,
           senderCompact: compactPinOnly(msg.senderPin || ''),

@@ -762,6 +762,7 @@ class SoundAndNotificationController {
     }
     const hasValidSeq = Number.isInteger(groupSeq) && groupSeq > 0;
     const groupIdB64 = (bubble.dataset.groupId ?? '').trim();
+    const sentAtMs = Number(bubble.dataset.sentAtMs ?? '') || undefined;
     const mine = bubble.dataset.mine === '1' || bubble.classList.contains('mine');
 
     const rawContactPin = (mine ? bubble.dataset.peerPin : bubble.dataset.senderPin) ?? '';
@@ -838,7 +839,7 @@ class SoundAndNotificationController {
         closeMenu();
         window.dispatchEvent(
           new CustomEvent('pin:delete-message', {
-            detail: { groupIdB64, groupSeq, scope: 'me' },
+            detail: { groupIdB64, groupSeq, sentAtMs, scope: 'me' },
           }),
         );
       });
@@ -855,7 +856,7 @@ class SoundAndNotificationController {
           if (!ok) return;
           window.dispatchEvent(
             new CustomEvent('pin:delete-message', {
-              detail: { groupIdB64, groupSeq, scope: 'everyone' },
+              detail: { groupIdB64, groupSeq, sentAtMs, scope: 'everyone' },
             }),
           );
         });

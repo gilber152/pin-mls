@@ -4,7 +4,7 @@ import { ensureWebPushSubscribed, registerAppServiceWorker, unsubscribeWebPush }
 import { applyWhatsAppLayoutClasses, waAlerts } from './ui/whatsappAndAlerts.js';
 import type { VaultGroup, VaultState } from './types.js';
 import { loadVault, saveVault, wipeVault, setPinAlias, loadPinAliases, applySyncedPinAliases } from './storage/vaultDb.js';
-import { archiveMessagesForPin, consolidateVaultGroupsByPin } from './storage/pinGroupConsolidator.js';
+import { archiveMessagesForPin, consolidateVaultGroupsByPin, markMessageDeletedForPin, markSeqDeletedForPin } from './storage/pinGroupConsolidator.js';
 import { CryptoWorkerClient, type StartedLinkSessionDto } from './worker/workerClient.js';
 import {
   API_BASE,
@@ -329,6 +329,7 @@ function renderAll(): void {
     const bubble = document.createElement('div');
     bubble.className = `msg-bubble ${m.mine ? 'mine' : 'theirs'}`;
     bubble.dataset.groupSeq = String(m.groupSeq);
+    bubble.dataset.sentAtMs = String(m.sentAtMs);
     bubble.dataset.senderPin = formatPin(m.senderPin);
     bubble.dataset.peerPin = formatPin(activeGrp.peerPin);
     bubble.dataset.mine = m.mine ? '1' : '0';
@@ -2305,6 +2306,8 @@ function tryHandleIncomingMessageDelete(grp: VaultGroup, senderPin: string, rawT
     }
     const targetSeq = obj.targetSeq;
     const normSender = senderPin.replace(/[^A-Z0-9]/gi, '').toUpperCase();
+    const isOwnSender = Boolean(vault && vault.pin.replace(/[^A-Z0-9]/gi, '').toUpperCase() === normSender);
+    markSeqDeletedForPin(grp.peerPin, senderPin, targetSeq, isOwnSender);
     grp.messages = grp.messages.filter((m) => {
       if (m.groupSeq !== targetSeq) return true;
       const msgSender = m.senderPin.replace(/[^A-Z0-9]/gi, '').toUpperCase();
@@ -2363,7 +2366,14 @@ async function sendMessageDeleteControl(grp: VaultGroup, targetSeq: number): Pro
 }
 
 window.addEventListener('pin:delete-message', (ev: Event) => {
-  const detail = (ev as CustomEvent<{ groupIdB64?: string; groupSeq?: number; scope?: 'me' | 'everyone' }>).detail;
+  const detail = (
+    ev as CustomEvent<{
+      groupIdB64?: string;
+      groupSeq?: number;
+      sentAtMs?: number;
+      scope?: 'me' | 'everyone';
+    }>
+  ).detail;
   if (!detail || typeof detail.groupSeq !== 'number' || !Number.isInteger(detail.groupSeq)) return;
   if (!vault) return;
 
@@ -2373,12 +2383,22 @@ window.addEventListener('pin:delete-message', (ev: Event) => {
   if (!grp) return;
 
   const targetSeq = detail.groupSeq;
+  const targetTs =
+    typeof detail.sentAtMs === 'number' && Number.isFinite(detail.sentAtMs) && detail.sentAtMs > 0
+      ? detail.sentAtMs
+      : null;
   const scope = detail.scope === 'everyone' ? 'everyone' : 'me';
 
   void (async () => {
     try {
-      const targetMsg = grp.messages.find((m) => m.groupSeq === targetSeq);
-      if (!targetMsg) return;
+      const targetMsg =
+        (targetTs !== null
+          ? grp.messages.find((m) => m.groupSeq === targetSeq && m.sentAtMs === targetTs)
+          : undefined) ?? grp.messages.find((m) => m.groupSeq === targetSeq);
+      if (!targetMsg) {
+        setGlobalStatus('No se encontró ese mensaje en el historial local.');
+        return;
+      }
 
       if (scope === 'everyone' && !targetMsg.mine) {
         setGlobalStatus('Solo puedes eliminar para todos tus propios mensajes.');
@@ -2394,7 +2414,23 @@ window.addEventListener('pin:delete-message', (ev: Event) => {
         await sendMessageDeleteControl(grp, targetSeq);
       }
 
-      grp.messages = grp.messages.filter((m) => m.groupSeq !== targetSeq);
+      // Registrar tombstone y purgar el respaldo en localStorage ANTES de saveVault()
+      markMessageDeletedForPin(
+        grp.peerPin,
+        targetMsg as unknown as Record<string, unknown>,
+        scope === 'everyone',
+      );
+      if (scope === 'everyone') {
+        markSeqDeletedForPin(grp.peerPin, targetMsg.senderPin, targetSeq, true);
+      }
+
+      grp.messages = grp.messages.filter((m) => {
+        if (m === targetMsg) return false;
+        if (targetTs !== null && m.groupSeq === targetSeq && m.sentAtMs === targetTs) return false;
+        if (scope === 'everyone' && m.groupSeq === targetSeq && m.mine) return false;
+        return true;
+      });
+
       await saveVault(vault);
       renderAll();
       setGlobalStatus(
