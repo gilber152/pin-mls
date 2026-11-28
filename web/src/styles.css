@@ -2956,3 +2956,49 @@ button[aria-label*="audio" i] {
   gap: 10px;
 }
 /* === PIN_INLINE_ATTACHMENTS_STYLE_END === */
+/* === PIN_SUPABASE_MEDIA_EXTRA_START === */
+.pin-visually-hidden-file {
+  position: fixed !important;
+  left: -9999px !important;
+  top: -9999px !important;
+  width: 1px !important;
+  height: 1px !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+.pin-attach-bar-meta.is-error,
+.pin-attach-file-size.is-error {
+  color: #fca5a5 !important;
+  -webkit-text-fill-color: #fca5a5 !important;
+}
+
+.pin-attach-slot {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.pin-attach-loading {
+  font-size: 0.84rem;
+  opacity: 0.9;
+  padding: 6px 2px;
+}
+
+.pin-attach-decrypt-btn {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  min-height: 34px !important;
+  padding: 6px 12px !important;
+  border-radius: 8px !important;
+  background: #1d4ed8 !important;
+  border: 1px solid #3b82f6 !important;
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff !important;
+  font-weight: 700 !important;
+  font-size: 0.82rem !important;
+  cursor: pointer !important;
+  flex-shrink: 0 !important;
+}
+/* === PIN_SUPABASE_MEDIA_EXTRA_END === */

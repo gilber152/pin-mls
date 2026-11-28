@@ -1,3 +1,4 @@
+import { setMediaAuthProvider } from './net/e2eeMedia.js';
 import { VoiceCallController, isVoiceCallSignalText } from './call/voiceCall.js';
 import { ensureWebPushSubscribed, registerAppServiceWorker, unsubscribeWebPush } from './net/webPush.js';
 import { applyWhatsAppLayoutClasses, waAlerts } from './ui/whatsappAndAlerts.js';
@@ -2207,3 +2208,14 @@ window.addEventListener('pin:send-raw-payload', (ev: Event) => {
   })();
 });
 /* === PIN_VOICE_SEND_LISTENER_END === */
+
+/* === PIN_MEDIA_BRIDGE_START === */
+setMediaAuthProvider(() => {
+  if (!vault) return null;
+  return {
+    authedFetch: (v, path, init) => api.authedFetch(v, path, init),
+    vault,
+    activeGroupIdB64,
+  };
+});
+/* === PIN_MEDIA_BRIDGE_END === */

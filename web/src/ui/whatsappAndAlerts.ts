@@ -1,4 +1,11 @@
 import {
+  MAX_E2EE_MEDIA_BYTES,
+  downloadAndDecryptMedia,
+  hasCachedMedia,
+  uploadEncryptedMediaFile,
+  type RemoteMediaDescriptor,
+} from '../net/e2eeMedia.js';
+import {
   loadPinAliases,
   setPinAlias as saveVaultPinAlias,
   type PinAliasMap,
@@ -24,11 +31,16 @@ interface VoicePayload {
 type AttachmentKind = 'image' | 'audio' | 'video' | 'file';
 
 interface AttachmentPayload {
+  storage?: 'inline' | 'supabase';
+  mediaId?: string;
+  keyB64?: string;
+  ivB64?: string;
+  sha256B64?: string;
   name: string;
   mime: string;
   sizeBytes: number;
   kind: AttachmentKind;
-  dataB64: string;
+  dataB64?: string;
   caption?: string;
 }
 
@@ -39,8 +51,7 @@ interface ParsedPinEnvelope {
   attachment?: AttachmentPayload;
 }
 
-const MAX_ATTACHMENT_RAW_BYTES = 330_000;
-const MAX_IMAGE_TARGET_BYTES = 300_000;
+const AUTO_DOWNLOAD_IMAGE_MAX_BYTES = 6 * 1024 * 1024;
 
 const PIN_PATTERN = /\b[A-Z0-9]{4}-?[A-Z0-9]{4}\b/g;
 const SINGLE_PIN_RE = /\b[A-Z0-9]{4}-?[A-Z0-9]{4}\b/;
@@ -180,8 +191,7 @@ function parseAttachmentFromRaw(raw: string): AttachmentPayload | undefined {
     if (!rawAtt || typeof rawAtt !== 'object' || Array.isArray(rawAtt)) return undefined;
     const a = rawAtt as Record<string, unknown>;
     const name = typeof a['name'] === 'string' ? a['name'].trim() : '';
-    const mime = typeof a['mime'] === 'string' ? a['mime'].trim() : '';
-    const dataB64 = typeof a['dataB64'] === 'string' ? a['dataB64'].trim() : '';
+    const mime = typeof a['mime'] === 'string' ? a['mime'].trim() : 'application/octet-stream';
     const sizeBytes =
       typeof a['sizeBytes'] === 'number' && Number.isFinite(a['sizeBytes']) ? a['sizeBytes'] : 0;
     const kindRaw = typeof a['kind'] === 'string' ? a['kind'] : '';
@@ -189,9 +199,35 @@ function parseAttachmentFromRaw(raw: string): AttachmentPayload | undefined {
       kindRaw === 'image' || kindRaw === 'audio' || kindRaw === 'video' || kindRaw === 'file'
         ? kindRaw
         : classifyAttachmentKind(mime, name);
-    const caption = typeof a['caption'] === 'string' && a['caption'].trim() ? a['caption'].trim() : undefined;
-    if (!name || !mime || !dataB64) return undefined;
+    const caption =
+      typeof a['caption'] === 'string' && a['caption'].trim() ? a['caption'].trim() : undefined;
+
+    if (!name) return undefined;
+
+    if (a['storage'] === 'supabase') {
+      const mediaId = typeof a['mediaId'] === 'string' ? a['mediaId'].trim() : '';
+      const keyB64 = typeof a['keyB64'] === 'string' ? a['keyB64'].trim() : '';
+      const ivB64 = typeof a['ivB64'] === 'string' ? a['ivB64'].trim() : '';
+      const sha256B64 = typeof a['sha256B64'] === 'string' ? a['sha256B64'].trim() : '';
+      if (!mediaId || !keyB64 || !ivB64 || !sha256B64) return undefined;
+      return {
+        storage: 'supabase',
+        mediaId,
+        keyB64,
+        ivB64,
+        sha256B64,
+        name,
+        mime,
+        sizeBytes,
+        kind,
+        ...(caption ? { caption } : {}),
+      };
+    }
+
+    const dataB64 = typeof a['dataB64'] === 'string' ? a['dataB64'].trim() : '';
+    if (!dataB64) return undefined;
     return {
+      storage: 'inline',
       name,
       mime,
       sizeBytes,
@@ -201,87 +237,6 @@ function parseAttachmentFromRaw(raw: string): AttachmentPayload | undefined {
     };
   } catch {
     return undefined;
-  }
-}
-
-async function compressImageFileForInline(file: File): Promise<{ blob: Blob; mime: string; name: string; compressed: boolean }> {
-  if (file.type === 'image/gif' && file.size <= MAX_ATTACHMENT_RAW_BYTES) {
-    return { blob: file, mime: file.type, name: file.name, compressed: false };
-  }
-  if (file.type !== 'image/svg+xml' && file.size <= MAX_IMAGE_TARGET_BYTES) {
-    return { blob: file, mime: file.type || 'image/jpeg', name: file.name, compressed: false };
-  }
-
-  const objUrl = URL.createObjectURL(file);
-  try {
-    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
-      const el = new Image();
-      el.onload = () => resolve(el);
-      el.onerror = () => reject(new Error('No se pudo leer la imagen seleccionada.'));
-      el.src = objUrl;
-    });
-
-    const origW = img.naturalWidth || img.width;
-    const origH = img.naturalHeight || img.height;
-    if (!origW || !origH) {
-      throw new Error('Dimensiones de imagen inválidas.');
-    }
-
-    const attempts = [
-      { maxDim: 1400, quality: 0.82 },
-      { maxDim: 1200, quality: 0.72 },
-      { maxDim: 960, quality: 0.62 },
-      { maxDim: 800, quality: 0.52 },
-      { maxDim: 640, quality: 0.42 },
-      { maxDim: 480, quality: 0.34 },
-    ];
-
-    const canvas = document.createElement('canvas');
-    const ctx = canvas.getContext('2d');
-    if (!ctx) {
-      throw new Error('Tu navegador no permite comprimir imágenes en canvas.');
-    }
-
-    let smallestBlob: Blob | null = null;
-    for (const step of attempts) {
-      const scale = Math.min(1, step.maxDim / Math.max(origW, origH));
-      canvas.width = Math.max(1, Math.round(origW * scale));
-      canvas.height = Math.max(1, Math.round(origH * scale));
-      ctx.fillStyle = '#ffffff';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-
-      const candidate = await new Promise<Blob | null>((resolve) => {
-        canvas.toBlob((b) => resolve(b), 'image/jpeg', step.quality);
-      });
-      if (!candidate) continue;
-      if (!smallestBlob || candidate.size < smallestBlob.size) {
-        smallestBlob = candidate;
-      }
-      if (candidate.size <= MAX_IMAGE_TARGET_BYTES) {
-        const baseName = file.name.replace(/.[^.]+$/, '') || 'imagen';
-        return {
-          blob: candidate,
-          mime: 'image/jpeg',
-          name: `${baseName}.jpg`,
-          compressed: true,
-        };
-      }
-    }
-
-    if (smallestBlob && smallestBlob.size <= MAX_ATTACHMENT_RAW_BYTES) {
-      const baseName = file.name.replace(/.[^.]+$/, '') || 'imagen';
-      return {
-        blob: smallestBlob,
-        mime: 'image/jpeg',
-        name: `${baseName}.jpg`,
-        compressed: true,
-      };
-    }
-
-    throw new Error('La imagen sigue superando 330 KB tras comprimirla. Prueba con una foto más pequeña.');
-  } finally {
-    URL.revokeObjectURL(objUrl);
   }
 }
 
@@ -426,7 +381,8 @@ class SoundAndNotificationController {
   private recordingCancelled = false;
   private voiceBlobUrlCache = new Map<string, string>();
   private attachBlobUrlCache = new Map<string, string>();
-  private pendingAttachment: { payload: AttachmentPayload; previewUrl: string | null; compressed: boolean } | null = null;
+  private pendingAttachment: { file: File; kind: AttachmentKind; previewUrl: string | null } | null = null;
+  private isUploadingAttachment = false;
   private attachSubmitBound = false;
 
   constructor() {
@@ -779,12 +735,14 @@ class SoundAndNotificationController {
       actions.className = 'pin-attach-bar-actions';
 
       const sendBtn = document.createElement('button');
+      sendBtn.id = 'pin-attach-send-btn';
       sendBtn.type = 'button';
       sendBtn.className = 'pin-attach-send-btn';
       sendBtn.textContent = 'Enviar';
-      sendBtn.addEventListener('click', () => this.sendPendingAttachment());
+      sendBtn.addEventListener('click', () => void this.sendPendingAttachment());
 
       const clearBtn = document.createElement('button');
+      clearBtn.id = 'pin-attach-clear-btn';
       clearBtn.type = 'button';
       clearBtn.className = 'pin-attach-cancel-btn';
       clearBtn.textContent = '✕';
@@ -796,21 +754,21 @@ class SoundAndNotificationController {
       form.insertAdjacentElement('beforebegin', bar);
     }
 
+    // Input file fuera de pantalla (sin display:none para compatibilidad en navegadores móviles)
     let fileInput = document.getElementById('pin-inline-file-input') as HTMLInputElement | null;
     if (!fileInput) {
       fileInput = document.createElement('input');
       fileInput.id = 'pin-inline-file-input';
       fileInput.type = 'file';
-      fileInput.hidden = true;
-      fileInput.style.display = 'none';
+      fileInput.className = 'pin-visually-hidden-file';
       fileInput.addEventListener('change', () => {
         const picked = fileInput?.files?.[0] ?? null;
         if (fileInput) fileInput.value = '';
         if (picked) {
-          void this.prepareAttachmentFile(picked);
+          this.prepareAttachmentFile(picked);
         }
       });
-      form.appendChild(fileInput);
+      document.body.appendChild(fileInput);
     }
 
     if (!document.getElementById('btn-attach-file')) {
@@ -818,9 +776,12 @@ class SoundAndNotificationController {
       attachBtn.id = 'btn-attach-file';
       attachBtn.type = 'button';
       attachBtn.textContent = '📎';
-      attachBtn.title = 'Adjuntar imagen, documento, audio o video corto (cifrado E2EE)';
+      attachBtn.title = 'Adjuntar imagen, video, audio o documento cifrado (hasta 25 MB)';
       attachBtn.setAttribute('aria-label', 'Adjuntar archivo cifrado');
-      attachBtn.addEventListener('click', () => {
+      attachBtn.addEventListener('click', (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        if (this.isUploadingAttachment) return;
         const inp = document.getElementById('pin-inline-file-input') as HTMLInputElement | null;
         inp?.click();
       });
@@ -844,73 +805,64 @@ class SoundAndNotificationController {
           if (!this.pendingAttachment) return;
           ev.preventDefault();
           ev.stopImmediatePropagation();
-          this.sendPendingAttachment();
+          void this.sendPendingAttachment();
         },
         true,
       );
     }
   }
 
-  private async prepareAttachmentFile(file: File): Promise<void> {
-    const statusEl = document.getElementById('global-status');
-    try {
-      const kind = classifyAttachmentKind(file.type || '', file.name || 'archivo');
-      let finalBlob: Blob = file;
-      let finalMime = file.type || 'application/octet-stream';
-      let finalName = (file.name || 'archivo').trim();
-      let compressed = false;
-
-      if (kind === 'image') {
-        if (statusEl) statusEl.textContent = 'Optimizando imagen para envío cifrado…';
-        const res = await compressImageFileForInline(file);
-        finalBlob = res.blob;
-        finalMime = res.mime;
-        finalName = res.name;
-        compressed = res.compressed;
-      } else if (file.size > MAX_ATTACHMENT_RAW_BYTES) {
-        if (statusEl) {
-          statusEl.textContent = `El archivo pesa ${formatFileSize(file.size)}. El límite actual sin almacenamiento externo es 330 KB (las imágenes se comprimen automáticamente).`;
-        }
-        return;
-      }
-
-      if (finalBlob.size === 0) {
-        if (statusEl) statusEl.textContent = 'El archivo seleccionado está vacío.';
-        return;
-      }
-
-      const dataB64 = await blobToBase64(finalBlob);
-      this.clearPendingAttachment();
-
-      const previewUrl = kind === 'image' ? URL.createObjectURL(finalBlob) : null;
-      this.pendingAttachment = {
-        payload: {
-          name: finalName,
-          mime: finalMime,
-          sizeBytes: finalBlob.size,
-          kind,
-          dataB64,
-        },
-        previewUrl,
-        compressed,
-      };
-
-      this.renderPendingAttachmentBar();
-      if (statusEl) {
-        statusEl.textContent = `Archivo listo: ${finalName} (${formatFileSize(finalBlob.size)}). Pulsa Enviar.`;
-      }
-    } catch (err) {
-      if (statusEl) {
-        statusEl.textContent = `Error preparando adjunto: ${(err as Error).message}`;
-      }
-    }
-  }
-
-  private renderPendingAttachmentBar(): void {
+  private showAttachBarNotice(title: string, subtitle: string, isError = false): void {
     const bar = document.getElementById('pin-attach-bar');
     const thumb = document.getElementById('pin-attach-thumb') as HTMLImageElement | null;
     const nameEl = document.getElementById('pin-attach-name');
     const metaEl = document.getElementById('pin-attach-meta');
+    const sendBtn = document.getElementById('pin-attach-send-btn') as HTMLButtonElement | null;
+    if (!bar) return;
+
+    if (thumb) {
+      thumb.hidden = true;
+      thumb.removeAttribute('src');
+    }
+    if (nameEl) nameEl.textContent = title;
+    if (metaEl) {
+      metaEl.textContent = subtitle;
+      metaEl.classList.toggle('is-error', isError);
+    }
+    if (sendBtn) sendBtn.hidden = true;
+    bar.hidden = false;
+  }
+
+  private prepareAttachmentFile(file: File): void {
+    const statusEl = document.getElementById('global-status');
+    if (file.size <= 0) {
+      this.showAttachBarNotice('Archivo vacío', 'Selecciona un archivo con contenido.', true);
+      return;
+    }
+    if (file.size > MAX_E2EE_MEDIA_BYTES) {
+      const msg = `El archivo pesa ${formatFileSize(file.size)}. El límite cifrado es 25 MB.`;
+      this.showAttachBarNotice(`⚠️ ${file.name}`, msg, true);
+      if (statusEl) statusEl.textContent = msg;
+      return;
+    }
+
+    const kind = classifyAttachmentKind(file.type || '', file.name || 'archivo');
+    this.clearPendingAttachment();
+    const previewUrl = kind === 'image' ? URL.createObjectURL(file) : null;
+    this.pendingAttachment = { file, kind, previewUrl };
+    this.renderPendingAttachmentBar();
+    if (statusEl) {
+      statusEl.textContent = `Archivo listo: ${file.name} (${formatFileSize(file.size)}). Pulsa Enviar.`;
+    }
+  }
+
+  private renderPendingAttachmentBar(customMeta?: string, isError = false): void {
+    const bar = document.getElementById('pin-attach-bar');
+    const thumb = document.getElementById('pin-attach-thumb') as HTMLImageElement | null;
+    const nameEl = document.getElementById('pin-attach-name');
+    const metaEl = document.getElementById('pin-attach-meta');
+    const sendBtn = document.getElementById('pin-attach-send-btn') as HTMLButtonElement | null;
+    const clearBtn = document.getElementById('pin-attach-clear-btn') as HTMLButtonElement | null;
     if (!bar) return;
 
     if (!this.pendingAttachment) {
@@ -919,10 +871,11 @@ class SoundAndNotificationController {
         thumb.hidden = true;
         thumb.removeAttribute('src');
       }
+      if (metaEl) metaEl.classList.remove('is-error');
       return;
     }
 
-    const { payload, previewUrl, compressed } = this.pendingAttachment;
+    const { file, kind, previewUrl } = this.pendingAttachment;
     if (thumb) {
       if (previewUrl) {
         thumb.src = previewUrl;
@@ -933,15 +886,26 @@ class SoundAndNotificationController {
       }
     }
     if (nameEl) {
-      nameEl.textContent = `${getAttachmentIcon(payload.kind, payload.name)} ${payload.name}`;
+      nameEl.textContent = `${getAttachmentIcon(kind, file.name)} ${file.name}`;
     }
     if (metaEl) {
-      metaEl.textContent = `${formatFileSize(payload.sizeBytes)}${compressed ? ' · optimizada' : ''} · cifrado E2EE`;
+      metaEl.textContent =
+        customMeta ?? `${formatFileSize(file.size)} · cifrado AES-256-GCM (Supabase Storage)`;
+      metaEl.classList.toggle('is-error', isError);
+    }
+    if (sendBtn) {
+      sendBtn.hidden = false;
+      sendBtn.disabled = this.isUploadingAttachment;
+      sendBtn.textContent = this.isUploadingAttachment ? 'Subiendo…' : 'Enviar';
+    }
+    if (clearBtn) {
+      clearBtn.disabled = this.isUploadingAttachment;
     }
     bar.hidden = false;
   }
 
   private clearPendingAttachment(): void {
+    if (this.isUploadingAttachment) return;
     if (this.pendingAttachment?.previewUrl) {
       URL.revokeObjectURL(this.pendingAttachment.previewUrl);
     }
@@ -949,43 +913,62 @@ class SoundAndNotificationController {
     this.renderPendingAttachmentBar();
   }
 
-  private sendPendingAttachment(): void {
+  private async sendPendingAttachment(): Promise<void> {
     const staged = this.pendingAttachment;
-    if (!staged) return;
+    if (!staged || this.isUploadingAttachment) return;
 
+    const statusEl = document.getElementById('global-status');
     const inputEl = document.getElementById('input-msg') as HTMLInputElement | null;
     const caption = (inputEl?.value ?? '').trim();
-    if (inputEl) inputEl.value = '';
 
-    const replyTo = this.activeReply;
-    if (replyTo) this.clearActiveReply();
+    this.isUploadingAttachment = true;
+    this.renderPendingAttachmentBar('Cifrando archivo (AES-256-GCM)…', false);
 
-    const attPayload: AttachmentPayload = {
-      ...staged.payload,
-      ...(caption ? { caption } : {}),
-    };
-    const icon = getAttachmentIcon(attPayload.kind, attPayload.name);
-    const summary = caption
-      ? `${icon} ${attPayload.name} — ${caption}`
-      : `${icon} ${attPayload.name}`;
+    try {
+      const descriptor = await uploadEncryptedMediaFile(staged.file, staged.kind, (step) => {
+        this.renderPendingAttachmentBar(step, false);
+        if (statusEl) statusEl.textContent = step;
+      });
 
-    const envelope = {
-      __pin_v: 2,
-      kind: 'text',
-      text: summary,
-      ...(replyTo ? { replyTo } : {}),
-      attachment: attPayload,
-    };
+      if (inputEl) inputEl.value = '';
+      const replyTo = this.activeReply;
+      if (replyTo) this.clearActiveReply();
 
-    this.clearPendingAttachment();
-    window.dispatchEvent(
-      new CustomEvent('pin:send-raw-payload', {
-        detail: { payload: JSON.stringify(envelope) },
-      }),
-    );
+      const attPayload: RemoteMediaDescriptor = {
+        ...descriptor,
+        ...(caption ? { caption } : {}),
+      };
+      const icon = getAttachmentIcon(attPayload.kind, attPayload.name);
+      const summary = caption
+        ? `${icon} ${attPayload.name} — ${caption}`
+        : `${icon} ${attPayload.name}`;
+
+      const envelope = {
+        __pin_v: 2,
+        kind: 'text',
+        text: summary,
+        ...(replyTo ? { replyTo } : {}),
+        attachment: attPayload,
+      };
+
+      this.isUploadingAttachment = false;
+      this.clearPendingAttachment();
+
+      window.dispatchEvent(
+        new CustomEvent('pin:send-raw-payload', {
+          detail: { payload: JSON.stringify(envelope) },
+        }),
+      );
+    } catch (err) {
+      this.isUploadingAttachment = false;
+      const errMsg = (err as Error).message || 'Error enviando archivo.';
+      this.renderPendingAttachmentBar(`Error: ${errMsg}`, true);
+      if (statusEl) statusEl.textContent = `Error adjunto: ${errMsg}`;
+    }
   }
 
-  private getOrCreateAttachmentUrl(att: AttachmentPayload): string | null {
+  private getOrCreateInlineAttachmentUrl(att: AttachmentPayload): string | null {
+    if (!att.dataB64) return null;
     const safeMime = att.kind === 'file' ? getSafeDownloadMime(att.mime) : att.mime;
     const cacheKey = `${safeMime}|${att.dataB64.length}|${att.dataB64.slice(0, 40)}`;
     const existing = this.attachBlobUrlCache.get(cacheKey);
@@ -995,6 +978,60 @@ class SoundAndNotificationController {
       this.attachBlobUrlCache.set(cacheKey, url);
     }
     return url;
+  }
+
+  private renderDecryptedMediaIntoSlot(slot: HTMLElement, att: AttachmentPayload, blobUrl: string): void {
+    slot.innerHTML = '';
+
+    if (att.kind === 'image') {
+      const img = document.createElement('img');
+      img.className = 'pin-attach-img';
+      img.src = blobUrl;
+      img.alt = att.name;
+      img.loading = 'lazy';
+      img.addEventListener('click', () => this.openImageLightbox(blobUrl, att.name));
+      slot.appendChild(img);
+    } else if (att.kind === 'video') {
+      const video = document.createElement('video');
+      video.className = 'pin-attach-video';
+      video.controls = true;
+      video.preload = 'metadata';
+      video.setAttribute('playsinline', 'true');
+      video.src = blobUrl;
+      slot.appendChild(video);
+    } else if (att.kind === 'audio') {
+      const audio = document.createElement('audio');
+      audio.controls = true;
+      audio.preload = 'metadata';
+      audio.src = blobUrl;
+      slot.appendChild(audio);
+    }
+
+    const fileRow = document.createElement('div');
+    fileRow.className = 'pin-attach-file-row';
+
+    const metaWrap = document.createElement('div');
+    metaWrap.className = 'pin-attach-file-meta';
+
+    const nameDiv = document.createElement('div');
+    nameDiv.className = 'pin-attach-file-name';
+    nameDiv.textContent = `${getAttachmentIcon(att.kind, att.name)} ${att.name}`;
+
+    const sizeDiv = document.createElement('div');
+    sizeDiv.className = 'pin-attach-file-size';
+    sizeDiv.textContent = att.sizeBytes > 0 ? formatFileSize(att.sizeBytes) : att.mime;
+
+    metaWrap.append(nameDiv, sizeDiv);
+
+    const dl = document.createElement('a');
+    dl.className = 'pin-attach-download-btn';
+    dl.href = blobUrl;
+    dl.download = att.name;
+    dl.textContent = '⬇';
+    dl.title = `Descargar ${att.name}`;
+
+    fileRow.append(metaWrap, dl);
+    slot.appendChild(fileRow);
   }
 
   private openImageLightbox(srcUrl: string, fileName: string): void {
@@ -1901,62 +1938,95 @@ class SoundAndNotificationController {
         frag.appendChild(playerWrap);
       } else if (parsed.attachment) {
         const att = parsed.attachment;
-        const blobUrl = this.getOrCreateAttachmentUrl(att);
         const card = document.createElement('div');
         card.className = 'pin-attach-card';
 
-        if (att.kind === 'image' && blobUrl) {
-          const img = document.createElement('img');
-          img.className = 'pin-attach-img';
-          img.src = blobUrl;
-          img.alt = att.name;
-          img.loading = 'lazy';
-          img.addEventListener('click', () => this.openImageLightbox(blobUrl, att.name));
-          card.appendChild(img);
-        } else if (att.kind === 'video' && blobUrl) {
-          const video = document.createElement('video');
-          video.className = 'pin-attach-video';
-          video.controls = true;
-          video.preload = 'metadata';
-          video.setAttribute('playsinline', 'true');
-          video.src = blobUrl;
-          card.appendChild(video);
-        } else if (att.kind === 'audio' && blobUrl) {
-          const audio = document.createElement('audio');
-          audio.controls = true;
-          audio.preload = 'metadata';
-          audio.src = blobUrl;
-          card.appendChild(audio);
+        const mediaSlot = document.createElement('div');
+        mediaSlot.className = 'pin-attach-slot';
+        card.appendChild(mediaSlot);
+
+        if (att.storage === 'supabase' && att.mediaId && att.keyB64 && att.ivB64 && att.sha256B64) {
+          const remoteDesc: RemoteMediaDescriptor = {
+            storage: 'supabase',
+            mediaId: att.mediaId,
+            keyB64: att.keyB64,
+            ivB64: att.ivB64,
+            sha256B64: att.sha256B64,
+            name: att.name,
+            mime: att.mime,
+            sizeBytes: att.sizeBytes,
+            kind: att.kind,
+            ...(att.caption ? { caption: att.caption } : {}),
+          };
+
+          const buildLoadButton = (errNote?: string) => {
+            mediaSlot.innerHTML = '';
+            const fileRow = document.createElement('div');
+            fileRow.className = 'pin-attach-file-row';
+
+            const metaWrap = document.createElement('div');
+            metaWrap.className = 'pin-attach-file-meta';
+
+            const nameDiv = document.createElement('div');
+            nameDiv.className = 'pin-attach-file-name';
+            nameDiv.textContent = `${getAttachmentIcon(att.kind, att.name)} ${att.name}`;
+
+            const sizeDiv = document.createElement('div');
+            sizeDiv.className = 'pin-attach-file-size';
+            sizeDiv.textContent = errNote
+              ? errNote
+              : `${att.sizeBytes > 0 ? formatFileSize(att.sizeBytes) : 'Archivo'} · cifrado E2EE`;
+            if (errNote) sizeDiv.classList.add('is-error');
+
+            metaWrap.append(nameDiv, sizeDiv);
+
+            const loadBtn = document.createElement('button');
+            loadBtn.type = 'button';
+            loadBtn.className = 'pin-attach-decrypt-btn';
+            loadBtn.textContent = errNote ? 'Reintentar' : '⬇ Abrir';
+            loadBtn.addEventListener('click', () => void triggerLoad(true));
+
+            fileRow.append(metaWrap, loadBtn);
+            mediaSlot.appendChild(fileRow);
+          };
+
+          const triggerLoad = async (autoSaveIfFile: boolean) => {
+            mediaSlot.innerHTML = '';
+            const loading = document.createElement('div');
+            loading.className = 'pin-attach-loading';
+            loading.textContent = `Descifrando ${att.name}…`;
+            mediaSlot.appendChild(loading);
+            try {
+              const url = await downloadAndDecryptMedia(remoteDesc);
+              this.renderDecryptedMediaIntoSlot(mediaSlot, att, url);
+              if (autoSaveIfFile && att.kind === 'file') {
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = att.name;
+                a.click();
+              }
+            } catch (err) {
+              buildLoadButton((err as Error).message || 'Error al descifrar');
+            }
+          };
+
+          buildLoadButton();
+          void hasCachedMedia(remoteDesc.mediaId).then((cached) => {
+            if (cached || (att.kind === 'image' && att.sizeBytes <= AUTO_DOWNLOAD_IMAGE_MAX_BYTES)) {
+              void triggerLoad(false);
+            }
+          });
+        } else {
+          const inlineUrl = this.getOrCreateInlineAttachmentUrl(att);
+          if (inlineUrl) {
+            this.renderDecryptedMediaIntoSlot(mediaSlot, att, inlineUrl);
+          } else {
+            const fallback = document.createElement('div');
+            fallback.className = 'pin-attach-file-size';
+            fallback.textContent = `${getAttachmentIcon(att.kind, att.name)} ${att.name}`;
+            mediaSlot.appendChild(fallback);
+          }
         }
-
-        const fileRow = document.createElement('div');
-        fileRow.className = 'pin-attach-file-row';
-
-        const metaWrap = document.createElement('div');
-        metaWrap.className = 'pin-attach-file-meta';
-
-        const nameDiv = document.createElement('div');
-        nameDiv.className = 'pin-attach-file-name';
-        nameDiv.textContent = `${getAttachmentIcon(att.kind, att.name)} ${att.name}`;
-
-        const sizeDiv = document.createElement('div');
-        sizeDiv.className = 'pin-attach-file-size';
-        sizeDiv.textContent = att.sizeBytes > 0 ? formatFileSize(att.sizeBytes) : att.mime;
-
-        metaWrap.append(nameDiv, sizeDiv);
-        fileRow.appendChild(metaWrap);
-
-        if (blobUrl) {
-          const dl = document.createElement('a');
-          dl.className = 'pin-attach-download-btn';
-          dl.href = blobUrl;
-          dl.download = att.name;
-          dl.textContent = '⬇';
-          dl.title = `Descargar ${att.name}`;
-          fileRow.appendChild(dl);
-        }
-
-        card.appendChild(fileRow);
 
         if (att.caption) {
           const cap = document.createElement('div');
@@ -2196,7 +2266,7 @@ class SoundAndNotificationController {
       if (
         btn.id === 'pin-btn-edit-alias' ||
         btn.id === 'btn-search-saved-contacts' ||
-        btn.id === 'btn-voice-record' || btn.id === 'btn-attach-file' || Boolean(btn.closest('#pin-attach-bar')) || Boolean(btn.closest('#pin-img-lightbox')) || Boolean(btn.closest('#pin-voice-bar')) || btn.id === 'btn-start-voice-call' || Boolean(btn.closest('#pin-call-overlay'))
+        btn.id === 'btn-voice-record' || btn.id === 'btn-attach-file' || Boolean(btn.closest('#pin-attach-bar')) || Boolean(btn.closest('.pin-attach-card')) || Boolean(btn.closest('#pin-img-lightbox')) || Boolean(btn.closest('#pin-voice-bar')) || btn.id === 'btn-start-voice-call' || Boolean(btn.closest('#pin-call-overlay'))
       ) {
         return;
       }

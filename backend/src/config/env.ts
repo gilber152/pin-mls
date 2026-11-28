@@ -62,4 +62,9 @@ export const env = {
   VAPID_PUBLIC_KEY: (process.env.VAPID_PUBLIC_KEY ?? '').trim(),
   VAPID_PRIVATE_KEY: (process.env.VAPID_PRIVATE_KEY ?? '').trim(),
   VAPID_SUBJECT: (process.env.VAPID_SUBJECT ?? 'mailto:push@pin-mls.app').trim(),
+  SUPABASE_URL: (process.env.SUPABASE_URL ?? '').trim().replace(/\/+$/, ''),
+  SUPABASE_SERVICE_ROLE_KEY: (process.env.SUPABASE_SERVICE_ROLE_KEY ?? '').trim(),
+  SUPABASE_MEDIA_BUCKET: (process.env.SUPABASE_MEDIA_BUCKET ?? 'pin-mls-media').trim(),
+  MEDIA_MAX_BYTES: intEnv('MEDIA_MAX_BYTES', 26 * 1024 * 1024),
+  MEDIA_TTL_DAYS: intEnv('MEDIA_TTL_DAYS', 14),
 };
