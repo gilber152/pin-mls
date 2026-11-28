@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">PIN-MLS</string>
+    <string name="title_activity_main">PIN-MLS</string>
+    <string name="package_name">com.pinmls.app</string>
+    <string name="custom_url_scheme">com.pinmls.app</string>
+</resources>

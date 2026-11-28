@@ -1,0 +1,13 @@
+{
+  "appId": "com.pinmls.app",
+  "appName": "PIN-MLS",
+  "webDir": "dist",
+  "server": {
+    "androidScheme": "https",
+    "hostname": "localhost"
+  },
+  "android": {
+    "allowMixedContent": false,
+    "backgroundColor": "#0b132b"
+  }
+}

@@ -40,7 +40,16 @@ export async function buildApp(): Promise<FastifyInstance> {
   });
 
   await app.register(cors, {
-    origin: env.ALLOWED_WEB_ORIGINS,
+    origin: Array.isArray(env.ALLOWED_WEB_ORIGINS)
+      ? Array.from(
+          new Set([
+            ...env.ALLOWED_WEB_ORIGINS,
+            'https://localhost',
+            'http://localhost',
+            'capacitor://localhost',
+          ]),
+        )
+      : env.ALLOWED_WEB_ORIGINS,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: [
       'Content-Type',
