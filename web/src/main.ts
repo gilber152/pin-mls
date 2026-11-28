@@ -1563,12 +1563,15 @@ window.addEventListener('pin:delete-contact', (ev: Event) => {
 
   void (async () => {
     const removedIds: string[] = [];
+    const pinsToPurge = new Set<string>();
+    if (rawPin) pinsToPurge.add(rawPin);
     if (vault) {
     for (const [gid, grp] of Object.entries(vault.groups)) {
       const matchId = Boolean(groupIdB64 && gid === groupIdB64);
       const matchPin = Boolean(compactPin && groupMatchesPin(grp, compactPin));
       if (matchId || matchPin) {
         const pinToArchive = rawPin || (typeof grp.peerPin === 'string' ? grp.peerPin : '');
+        if (pinToArchive) pinsToPurge.add(pinToArchive.trim().toUpperCase());
         if (pinToArchive && Array.isArray(grp.messages)) {
           archiveMessagesForPin(pinToArchive, grp.messages);
         }
@@ -1586,13 +1589,15 @@ window.addEventListener('pin:delete-contact', (ev: Event) => {
       }
     }
 
-    // Purgar también el alias local y propagar la eliminación a otros dispositivos propios
-    if (rawPin) {
+    // Purgar también todos los alias asociados (con/sin guion) y propagar la baja
+    if (pinsToPurge.size > 0) {
       const w = window as unknown as { pinSetAlias?: (pin: string, alias: string) => Promise<void> };
-      try {
-        await w.pinSetAlias?.(rawPin, '');
-      } catch {
-        // Ignorado si el contacto no tenía alias guardado
+      for (const p of pinsToPurge) {
+        try {
+          await w.pinSetAlias?.(p, '');
+        } catch {
+          // Ignorado si el contacto no tenía alias guardado
+        }
       }
       const vAny = vault as unknown as { pinAliases?: Record<string, string> } | null;
       if (vAny?.pinAliases) {

@@ -32,9 +32,106 @@ function openDb(): Promise<IDBDatabase> {
   });
 }
 
+function compactPinOnly(pin: string): string {
+  return pin.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+}
+
+function canonicalPinKey(pin: string): string {
+  const compact = compactPinOnly(pin);
+  if (compact.length === 8) {
+    return `${compact.slice(0, 4)}-${compact.slice(4)}`;
+  }
+  return pin.trim().toUpperCase();
+}
+
+function pinKeyVariants(pin: string): string[] {
+  const raw = pin.trim().toUpperCase();
+  const compact = compactPinOnly(pin);
+  const canonical = canonicalPinKey(pin);
+  return Array.from(new Set([raw, compact, canonical].filter((k) => k.length > 0)));
+}
+
+function parseControlDeleteSeq(text: string): number | null {
+  const trimmed = text.trim();
+  if (!trimmed.startsWith('{') || !trimmed.includes('__pin_msg_delete')) return null;
+  try {
+    const obj = JSON.parse(trimmed) as { __pin_msg_delete?: unknown; targetSeq?: unknown };
+    if (
+      obj.__pin_msg_delete === 1 &&
+      typeof obj.targetSeq === 'number' &&
+      Number.isInteger(obj.targetSeq) &&
+      obj.targetSeq > 0
+    ) {
+      return obj.targetSeq;
+    }
+  } catch {
+    // No es un sobre de control válido
+  }
+  return null;
+}
+
+function purgeControlDeleteMessagesFromVault(state: VaultState | null): boolean {
+  if (!state || !state.groups) return false;
+  let changed = false;
+
+  for (const grp of Object.values(state.groups)) {
+    if (!grp || !Array.isArray(grp.messages) || grp.messages.length === 0) continue;
+
+    const deletions: Array<{ targetSeq: number; senderCompact: string; mine: boolean }> = [];
+    for (const msg of grp.messages) {
+      if (typeof msg.text !== 'string') continue;
+      const targetSeq = parseControlDeleteSeq(msg.text);
+      if (targetSeq !== null) {
+        deletions.push({
+          targetSeq,
+          senderCompact: compactPinOnly(msg.senderPin || ''),
+          mine: Boolean(msg.mine),
+        });
+      }
+    }
+
+    if (deletions.length === 0) continue;
+
+    const beforeLen = grp.messages.length;
+    grp.messages = grp.messages.filter((msg) => {
+      if (typeof msg.text === 'string' && parseControlDeleteSeq(msg.text) !== null) {
+        return false;
+      }
+      const msgSenderCompact = compactPinOnly(msg.senderPin || '');
+      for (const del of deletions) {
+        if (msg.groupSeq !== del.targetSeq) continue;
+        if ((del.senderCompact && msgSenderCompact === del.senderCompact) || (msg.mine && del.mine)) {
+          return false;
+        }
+      }
+      return true;
+    });
+
+    if (grp.messages.length !== beforeLen) {
+      changed = true;
+    }
+  }
+
+  return changed;
+}
+
+async function writeVaultRecord(state: VaultState): Promise<void> {
+  const db = await openDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, 'readwrite');
+    tx.objectStore(STORE_NAME).put(state, RECORD_KEY);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
 export async function loadVault(): Promise<VaultState | null> {
   const loaded = await loadVaultRaw();
-  return consolidateVaultGroupsByPin(loaded);
+  const consolidated = consolidateVaultGroupsByPin(loaded);
+  if (consolidated && purgeControlDeleteMessagesFromVault(consolidated)) {
+    await writeVaultRecord(consolidated).catch(() => {});
+  }
+  return consolidated;
 }
 
 async function loadVaultRaw(): Promise<VaultState | null> {
@@ -49,13 +146,8 @@ async function loadVaultRaw(): Promise<VaultState | null> {
 
 export async function saveVault(state: VaultState): Promise<void> {
   consolidateVaultGroupsByPin(state);
-  const db = await openDb();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE_NAME, 'readwrite');
-    tx.objectStore(STORE_NAME).put(state, RECORD_KEY);
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
-  });
+  purgeControlDeleteMessagesFromVault(state);
+  await writeVaultRecord(state);
 }
 
 export async function wipeVault(): Promise<void> {
@@ -70,7 +162,7 @@ export async function wipeVault(): Promise<void> {
 }
 
 function normalizePinKey(pin: string): string {
-  return pin.trim().toUpperCase();
+  return canonicalPinKey(pin);
 }
 
 export async function loadPinAliases(): Promise<PinAliasMap> {
@@ -106,15 +198,17 @@ export async function setPinAlias(pin: string, alias: string): Promise<PinAliasM
 }
 
 async function setPinAliasRaw(pin: string, alias: string): Promise<PinAliasMap> {
-  const cleanPin = normalizePinKey(pin);
+  const cleanPin = canonicalPinKey(pin);
+  const variants = pinKeyVariants(pin);
   const cleanAlias = alias.trim();
   const db = await openDb();
   await new Promise<void>((resolve, reject) => {
     const tx = db.transaction(ALIAS_STORE, 'readwrite');
     const store = tx.objectStore(ALIAS_STORE);
-    if (!cleanAlias) {
-      store.delete(cleanPin);
-    } else {
+    for (const variant of variants) {
+      store.delete(variant);
+    }
+    if (cleanAlias && cleanPin) {
       store.put(cleanAlias, cleanPin);
     }
     tx.oncomplete = () => resolve();
@@ -158,16 +252,18 @@ export async function applySyncedPinAliases(
     const tx = db.transaction(ALIAS_STORE, 'readwrite');
     const store = tx.objectStore(ALIAS_STORE);
     for (const rawPin of removedPins) {
-      const cleanPin = normalizePinKey(rawPin);
-      if (cleanPin) store.delete(cleanPin);
+      for (const variant of pinKeyVariants(rawPin)) {
+        store.delete(variant);
+      }
     }
     for (const [rawPin, rawAlias] of Object.entries(updates)) {
-      const cleanPin = normalizePinKey(rawPin);
+      const cleanPin = canonicalPinKey(rawPin);
+      const variants = pinKeyVariants(rawPin);
       const cleanAlias = rawAlias.trim();
-      if (!cleanPin) continue;
-      if (!cleanAlias) {
-        store.delete(cleanPin);
-      } else {
+      for (const variant of variants) {
+        store.delete(variant);
+      }
+      if (cleanPin && cleanAlias) {
         store.put(cleanAlias, cleanPin);
       }
     }
