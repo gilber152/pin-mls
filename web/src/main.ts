@@ -120,8 +120,49 @@ function normalizePinInput(raw: string): string {
   return raw.toUpperCase().replace(/[^0-9A-Z]/g, '');
 }
 
+let globalStatusHideTimer: number | null = null;
+let globalStatusObserverReady = false;
+
+function scheduleGlobalStatusAutoHide(): void {
+  if (globalStatusHideTimer !== null) {
+    window.clearTimeout(globalStatusHideTimer);
+    globalStatusHideTimer = null;
+  }
+  const text = (globalStatus.textContent ?? '').trim();
+  if (!text) {
+    globalStatus.classList.remove('pin-toast-visible');
+    return;
+  }
+  globalStatus.classList.add('pin-toast-visible');
+  globalStatusHideTimer = window.setTimeout(() => {
+    globalStatusHideTimer = null;
+    globalStatus.classList.remove('pin-toast-visible');
+    window.setTimeout(() => {
+      if (!globalStatus.classList.contains('pin-toast-visible')) {
+        globalStatus.textContent = '';
+      }
+    }, 260);
+  }, 4000);
+}
+
+function ensureGlobalStatusToastObserver(): void {
+  if (globalStatusObserverReady || typeof MutationObserver === 'undefined') return;
+  globalStatusObserverReady = true;
+  const obs = new MutationObserver(() => {
+    scheduleGlobalStatusAutoHide();
+  });
+  obs.observe(globalStatus, { childList: true, characterData: true, subtree: true });
+  scheduleGlobalStatusAutoHide();
+}
+
 function setGlobalStatus(msg: string): void {
+  ensureGlobalStatusToastObserver();
   globalStatus.textContent = msg;
+  scheduleGlobalStatusAutoHide();
+}
+
+if (typeof document !== 'undefined') {
+  ensureGlobalStatusToastObserver();
 }
 
 function setWsStatus(online: boolean, label?: string): void {
@@ -287,6 +328,11 @@ function renderAll(): void {
   for (const m of activeGrp.messages) {
     const bubble = document.createElement('div');
     bubble.className = `msg-bubble ${m.mine ? 'mine' : 'theirs'}`;
+    bubble.dataset.groupSeq = String(m.groupSeq);
+    bubble.dataset.senderPin = formatPin(m.senderPin);
+    bubble.dataset.peerPin = formatPin(activeGrp.peerPin);
+    bubble.dataset.mine = m.mine ? '1' : '0';
+    bubble.dataset.groupId = activeGrp.groupIdB64;
 
     const body = document.createElement('div');
     body.textContent = m.text;
@@ -1151,6 +1197,10 @@ async function syncNow(): Promise<void> {
               dirty = true;
               continue;
             }
+            if (tryHandleIncomingMessageDelete(grp, outcome.senderPin, parsed.text)) {
+              dirty = true;
+              continue;
+            }
             if (isVoiceCallSignalText(parsed.text)) {
               void voiceCallController.handleIncomingSignal({
                 groupIdB64: grp.groupIdB64,
@@ -1536,15 +1586,34 @@ window.addEventListener('pin:delete-contact', (ev: Event) => {
       }
     }
 
-    // El alias local se conserva para reconocer al contacto si vuelve a conectarse el mismo PIN
-
-  renderAll();
-  renderAll();
-    if (globalStatus) {
-      globalStatus.textContent = rawPin
-        ? `Contacto ${rawPin} eliminado de este dispositivo.`
-        : 'Contacto eliminado de este dispositivo.';
+    // Purgar también el alias local y propagar la eliminación a otros dispositivos propios
+    if (rawPin) {
+      const w = window as unknown as { pinSetAlias?: (pin: string, alias: string) => Promise<void> };
+      try {
+        await w.pinSetAlias?.(rawPin, '');
+      } catch {
+        // Ignorado si el contacto no tenía alias guardado
+      }
+      const vAny = vault as unknown as { pinAliases?: Record<string, string> } | null;
+      if (vAny?.pinAliases) {
+        const canonical = rawPin.includes('-')
+          ? rawPin
+          : compactPin.length === 8
+            ? `${compactPin.slice(0, 4)}-${compactPin.slice(4)}`
+            : rawPin;
+        delete vAny.pinAliases[rawPin];
+        delete vAny.pinAliases[canonical];
+        delete vAny.pinAliases[compactPin];
+      }
     }
+
+    renderAll();
+    window.dispatchEvent(new CustomEvent('pin:contacts-updated'));
+    setGlobalStatus(
+      rawPin
+        ? `Contacto ${rawPin} eliminado.`
+        : 'Contacto eliminado.',
+    );
   })();
 });
 /* === PIN_LOGOUT_AND_DELETE_CONTACT_END === */
@@ -2219,3 +2288,118 @@ setMediaAuthProvider(() => {
   };
 });
 /* === PIN_MEDIA_BRIDGE_END === */
+
+/* === PIN_DELETE_MESSAGE_START === */
+function tryHandleIncomingMessageDelete(grp: VaultGroup, senderPin: string, rawText: string): boolean {
+  const trimmed = rawText.trim();
+  if (!trimmed.startsWith('{') || !trimmed.includes('__pin_msg_delete')) return false;
+  try {
+    const obj = JSON.parse(trimmed) as { __pin_msg_delete?: unknown; targetSeq?: unknown };
+    if (obj.__pin_msg_delete !== 1 || typeof obj.targetSeq !== 'number' || !Number.isInteger(obj.targetSeq)) {
+      return false;
+    }
+    const targetSeq = obj.targetSeq;
+    const normSender = senderPin.replace(/[^A-Z0-9]/gi, '').toUpperCase();
+    grp.messages = grp.messages.filter((m) => {
+      if (m.groupSeq !== targetSeq) return true;
+      const msgSender = m.senderPin.replace(/[^A-Z0-9]/gi, '').toUpperCase();
+      return msgSender !== normSender;
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function sendMessageDeleteControl(grp: VaultGroup, targetSeq: number): Promise<void> {
+  if (!vault || !grp.active) return;
+  const controlText = JSON.stringify({
+    __pin_msg_delete: 1,
+    targetSeq,
+  });
+
+  for (let retry = 0; retry < 2; retry += 1) {
+    const sentAtMs = Date.now();
+    const enc = await worker.mlsEncryptMessage(
+      grp.groupIdB64,
+      JSON.stringify({
+        text: controlText,
+        sentAtMs,
+      }),
+    );
+    vault.mlsStorageJson = enc.storageJson;
+    await saveVault(vault);
+
+    const res = await api.authedFetch(vault, `/v1/groups/${grp.groupIdB64Url}/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        msgType: 'application',
+        epoch: enc.epoch,
+        clientMsgId: crypto.randomUUID(),
+        ciphertext: enc.ciphertextB64,
+      }),
+    });
+
+    if (res.status === 409 && retry === 0) {
+      await syncNow();
+      continue;
+    }
+    if (!res.ok) {
+      const txt = await res.text().catch(() => '');
+      throw new Error(`HTTP ${res.status}: ${txt.slice(0, 120)}`);
+    }
+
+    const resp = (await res.json()) as { groupSeq: number };
+    grp.lastSeq = Math.max(grp.lastSeq, resp.groupSeq);
+    await saveVault(vault);
+    return;
+  }
+}
+
+window.addEventListener('pin:delete-message', (ev: Event) => {
+  const detail = (ev as CustomEvent<{ groupIdB64?: string; groupSeq?: number; scope?: 'me' | 'everyone' }>).detail;
+  if (!detail || typeof detail.groupSeq !== 'number' || !Number.isInteger(detail.groupSeq)) return;
+  if (!vault) return;
+
+  const gid = detail.groupIdB64 || activeGroupIdB64;
+  if (!gid) return;
+  const grp = vault.groups[gid];
+  if (!grp) return;
+
+  const targetSeq = detail.groupSeq;
+  const scope = detail.scope === 'everyone' ? 'everyone' : 'me';
+
+  void (async () => {
+    try {
+      const targetMsg = grp.messages.find((m) => m.groupSeq === targetSeq);
+      if (!targetMsg) return;
+
+      if (scope === 'everyone' && !targetMsg.mine) {
+        setGlobalStatus('Solo puedes eliminar para todos tus propios mensajes.');
+        return;
+      }
+
+      if (scope === 'everyone') {
+        if (!grp.active) {
+          setGlobalStatus('El chat no está activo para eliminar el mensaje en el otro dispositivo.');
+          return;
+        }
+        setGlobalStatus('Eliminando mensaje para todos…');
+        await sendMessageDeleteControl(grp, targetSeq);
+      }
+
+      grp.messages = grp.messages.filter((m) => m.groupSeq !== targetSeq);
+      await saveVault(vault);
+      renderAll();
+      setGlobalStatus(
+        scope === 'everyone'
+          ? 'Mensaje eliminado para todos.'
+          : 'Mensaje eliminado de este dispositivo.',
+      );
+    } catch (err) {
+      setGlobalStatus(`Error eliminando mensaje: ${(err as Error).message}`);
+    }
+  })();
+});
+/* === PIN_DELETE_MESSAGE_END === */

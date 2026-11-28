@@ -556,6 +556,15 @@ class SoundAndNotificationController {
       vibrated = false;
     };
 
+    let longPressTimer: number | null = null;
+    let longPressTriggered = false;
+    const clearLongPress = () => {
+      if (longPressTimer !== null) {
+        window.clearTimeout(longPressTimer);
+        longPressTimer = null;
+      }
+    };
+
     list.addEventListener('pointerdown', (ev) => {
       if (ev.button !== 0 && ev.pointerType === 'mouse') return;
       const target = ev.target instanceof HTMLElement ? ev.target : null;
@@ -565,6 +574,8 @@ class SoundAndNotificationController {
       const bubble = target.closest<HTMLElement>('.msg-bubble');
       if (!bubble) return;
 
+      clearLongPress();
+      longPressTriggered = false;
       activeBubble = bubble;
       pointerId = ev.pointerId;
       startX = ev.clientX;
@@ -572,12 +583,28 @@ class SoundAndNotificationController {
       dragging = false;
       readyToReply = false;
       vibrated = false;
+
+      longPressTimer = window.setTimeout(() => {
+        longPressTimer = null;
+        if (!activeBubble || dragging) return;
+        longPressTriggered = true;
+        const heldBubble = activeBubble;
+        resetBubble();
+        if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
+          navigator.vibrate(18);
+        }
+        this.openMessageActionMenu(heldBubble);
+      }, 520);
     });
 
     list.addEventListener('pointermove', (ev) => {
       if (!activeBubble || ev.pointerId !== pointerId) return;
       const dx = ev.clientX - startX;
       const dy = ev.clientY - startY;
+
+      if (Math.hypot(dx, dy) > 10) {
+        clearLongPress();
+      }
 
       if (!dragging) {
         // Ignorar si el usuario está haciendo scroll vertical o deslizando a la izquierda
@@ -607,6 +634,12 @@ class SoundAndNotificationController {
     });
 
     const finishSwipe = (ev: PointerEvent) => {
+      clearLongPress();
+      if (longPressTriggered) {
+        longPressTriggered = false;
+        resetBubble();
+        return;
+      }
       if (!activeBubble || ev.pointerId !== pointerId) return;
       const shouldTrigger = dragging && readyToReply;
       const targetBubble = activeBubble;
@@ -623,6 +656,17 @@ class SoundAndNotificationController {
     list.addEventListener('pointerup', finishSwipe);
     list.addEventListener('pointercancel', finishSwipe);
 
+    list.addEventListener('contextmenu', (ev) => {
+      const target = ev.target instanceof HTMLElement ? ev.target : null;
+      if (!target || target.closest('audio, button, a, input, textarea')) return;
+      const bubble = target.closest<HTMLElement>('.msg-bubble');
+      if (!bubble) return;
+      ev.preventDefault();
+      clearLongPress();
+      resetBubble();
+      this.openMessageActionMenu(bubble);
+    });
+
     window.addEventListener('keydown', (ev) => {
       if (ev.key === 'Escape' && this.activeReply) {
         this.clearActiveReply();
@@ -631,6 +675,204 @@ class SoundAndNotificationController {
   }
 
   // === NOTAS DE VOZ E2EE ===
+
+  private openSaveAliasModal(pin: string): void {
+    const canonical = formatPinCanonical(pin);
+    if (!canonical) return;
+
+    document.getElementById('pin-alias-modal')?.remove();
+
+    const overlay = document.createElement('div');
+    overlay.id = 'pin-alias-modal';
+    overlay.className = 'pin-msg-action-overlay';
+    overlay.addEventListener('click', (ev) => {
+      if (ev.target === overlay) overlay.remove();
+    });
+
+    const card = document.createElement('form');
+    card.className = 'pin-msg-action-card';
+
+    const title = document.createElement('div');
+    title.className = 'pin-msg-action-title';
+    title.textContent = `Guardar contacto (${canonical})`;
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'pin-alias-modal-input';
+    input.placeholder = 'Escribe un alias (ej: Mamá, Juan, Oficina)…';
+    input.maxLength = 48;
+    input.value = this.getAliasForPin(canonical) ?? '';
+
+    const actions = document.createElement('div');
+    actions.className = 'pin-alias-modal-actions';
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.className = 'pin-msg-action-btn is-cancel';
+    cancelBtn.textContent = 'Cancelar';
+    cancelBtn.addEventListener('click', () => overlay.remove());
+
+    const saveBtn = document.createElement('button');
+    saveBtn.type = 'submit';
+    saveBtn.className = 'pin-msg-action-btn is-primary';
+    saveBtn.textContent = 'Guardar alias';
+
+    actions.append(cancelBtn, saveBtn);
+    card.append(title, input, actions);
+
+    card.addEventListener('submit', (ev) => {
+      ev.preventDefault();
+      const alias = input.value.trim();
+      if (!alias) {
+        input.focus();
+        return;
+      }
+      saveBtn.disabled = true;
+      void (async () => {
+        try {
+          await this.setPinAlias(canonical, alias);
+          overlay.remove();
+          const status = document.getElementById('global-status');
+          if (status) {
+            status.textContent = `Contacto guardado como "${alias}" (${canonical}).`;
+          }
+        } catch (err) {
+          saveBtn.disabled = false;
+          const status = document.getElementById('global-status');
+          if (status) {
+            status.textContent = `Error guardando alias: ${(err as Error).message}`;
+          }
+        }
+      })();
+    });
+
+    overlay.appendChild(card);
+    document.body.appendChild(overlay);
+    window.setTimeout(() => input.focus(), 30);
+  }
+
+  private openMessageActionMenu(bubble: HTMLElement): void {
+    document.getElementById('pin-msg-action-sheet')?.remove();
+
+    let groupSeq = Number(bubble.dataset.groupSeq ?? '');
+    if (!Number.isInteger(groupSeq) || groupSeq <= 0) {
+      const metaText = bubble.querySelector('.msg-meta')?.textContent ?? '';
+      const seqMatch = metaText.match(/#(\d+)/);
+      if (seqMatch) groupSeq = Number(seqMatch[1]);
+    }
+    const hasValidSeq = Number.isInteger(groupSeq) && groupSeq > 0;
+    const groupIdB64 = (bubble.dataset.groupId ?? '').trim();
+    const mine = bubble.dataset.mine === '1' || bubble.classList.contains('mine');
+
+    const rawContactPin = (mine ? bubble.dataset.peerPin : bubble.dataset.senderPin) ?? '';
+    let contactPin = rawContactPin ? formatPinCanonical(rawContactPin) : '';
+    if (!contactPin) {
+      const titleText = document.getElementById('active-chat-title')?.textContent ?? '';
+      const m = titleText.match(SINGLE_PIN_RE);
+      if (m) contactPin = formatPinCanonical(m[0]);
+    }
+    const hasAlias = Boolean(contactPin && this.getAliasForPin(contactPin));
+
+    const previewRaw = (bubble.dataset.pinCleanText || bubble.textContent || '').trim();
+    const preview = previewRaw.length > 72 ? `${previewRaw.slice(0, 72)}…` : previewRaw;
+
+    const overlay = document.createElement('div');
+    overlay.id = 'pin-msg-action-sheet';
+    overlay.className = 'pin-msg-action-overlay';
+
+    const closeMenu = () => {
+      overlay.remove();
+      window.removeEventListener('keydown', onEsc);
+    };
+    const onEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') closeMenu();
+    };
+    window.addEventListener('keydown', onEsc);
+
+    overlay.addEventListener('click', (ev) => {
+      if (ev.target === overlay) closeMenu();
+    });
+
+    const card = document.createElement('div');
+    card.className = 'pin-msg-action-card';
+    card.setAttribute('role', 'dialog');
+
+    if (preview) {
+      const prevEl = document.createElement('div');
+      prevEl.className = 'pin-msg-action-preview';
+      prevEl.textContent = preview;
+      card.appendChild(prevEl);
+    }
+
+    const replyCtx = this.extractBubbleReplyContext(bubble);
+    if (replyCtx) {
+      const replyBtn = document.createElement('button');
+      replyBtn.type = 'button';
+      replyBtn.className = 'pin-msg-action-btn';
+      replyBtn.textContent = '↩️ Responder mensaje';
+      replyBtn.addEventListener('click', () => {
+        closeMenu();
+        this.setActiveReply(replyCtx);
+      });
+      card.appendChild(replyBtn);
+    }
+
+    if (contactPin && !hasAlias) {
+      const aliasBtn = document.createElement('button');
+      aliasBtn.type = 'button';
+      aliasBtn.className = 'pin-msg-action-btn is-primary';
+      aliasBtn.textContent = `🏷️ Guardar contacto con alias (${contactPin})`;
+      aliasBtn.addEventListener('click', () => {
+        closeMenu();
+        this.openSaveAliasModal(contactPin);
+      });
+      card.appendChild(aliasBtn);
+    }
+
+    if (hasValidSeq) {
+      const delMeBtn = document.createElement('button');
+      delMeBtn.type = 'button';
+      delMeBtn.className = 'pin-msg-action-btn';
+      delMeBtn.textContent = '🗑️ Eliminar para mí';
+      delMeBtn.addEventListener('click', () => {
+        closeMenu();
+        window.dispatchEvent(
+          new CustomEvent('pin:delete-message', {
+            detail: { groupIdB64, groupSeq, scope: 'me' },
+          }),
+        );
+      });
+      card.appendChild(delMeBtn);
+
+      if (mine) {
+        const delAllBtn = document.createElement('button');
+        delAllBtn.type = 'button';
+        delAllBtn.className = 'pin-msg-action-btn is-danger';
+        delAllBtn.textContent = '🗑️ Eliminar para todos';
+        delAllBtn.addEventListener('click', () => {
+          closeMenu();
+          const ok = window.confirm('¿Eliminar este mensaje para todos en esta conversación?');
+          if (!ok) return;
+          window.dispatchEvent(
+            new CustomEvent('pin:delete-message', {
+              detail: { groupIdB64, groupSeq, scope: 'everyone' },
+            }),
+          );
+        });
+        card.appendChild(delAllBtn);
+      }
+    }
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.className = 'pin-msg-action-btn is-cancel';
+    cancelBtn.textContent = 'Cancelar';
+    cancelBtn.addEventListener('click', closeMenu);
+    card.appendChild(cancelBtn);
+
+    overlay.appendChild(card);
+    document.body.appendChild(overlay);
+  }
 
   private installVoiceControls(): void {
     if (typeof document === 'undefined') return;
@@ -1661,8 +1903,13 @@ class SoundAndNotificationController {
   async setPinAlias(pin: string, alias: string): Promise<void> {
     const canonical = formatPinCanonical(pin);
     if (!canonical) return;
-    const updated = await saveVaultPinAlias(canonical, alias.trim());
+    const clean = alias.trim();
+    const updated = await saveVaultPinAlias(canonical, clean);
     this.applyAliasMap(updated);
+    if (!clean) {
+      delete this.aliasesByCanonical[canonical];
+      delete this.aliasesByCompact[normalizePinCompact(canonical)];
+    }
     this.syncAllViews();
   }
 
@@ -2285,7 +2532,7 @@ class SoundAndNotificationController {
       if (
         btn.id === 'pin-btn-edit-alias' ||
         btn.id === 'btn-search-saved-contacts' ||
-        btn.id === 'btn-voice-record' || btn.id === 'btn-attach-file' || Boolean(btn.closest('#pin-attach-bar')) || Boolean(btn.closest('.pin-attach-card')) || Boolean(btn.closest('#pin-img-lightbox')) || Boolean(btn.closest('#pin-voice-bar')) || btn.id === 'btn-start-voice-call' || Boolean(btn.closest('#pin-call-overlay'))
+        btn.id === 'btn-voice-record' || btn.id === 'btn-attach-file' || Boolean(btn.closest('#pin-attach-bar')) || Boolean(btn.closest('.pin-attach-card')) || Boolean(btn.closest('#pin-img-lightbox')) || Boolean(btn.closest('#pin-msg-action-sheet')) || Boolean(btn.closest('#pin-alias-modal')) || Boolean(btn.closest('#pin-voice-bar')) || btn.id === 'btn-start-voice-call' || Boolean(btn.closest('#pin-call-overlay'))
       ) {
         return;
       }
@@ -2426,7 +2673,8 @@ class SoundAndNotificationController {
       contacts.push({ pin, groupIdB64: card.dataset.groupId ?? '' });
     });
 
-    for (const pin of Object.keys(this.aliasesByCanonical)) {
+    for (const [pin, aliasVal] of Object.entries(this.aliasesByCanonical)) {
+      if (!aliasVal || !aliasVal.trim()) continue;
       if (!seenPins.has(pin)) {
         seenPins.add(pin);
         contacts.push({ pin, groupIdB64: '' });
@@ -2554,6 +2802,15 @@ class SoundAndNotificationController {
         resultsBox.appendChild(row);
       }
     };
+
+    const onContactsUpdated = () => {
+      if (!document.body.contains(popover)) {
+        window.removeEventListener('pin:contacts-updated', onContactsUpdated);
+        return;
+      }
+      renderList(searchInput.value);
+    };
+    window.addEventListener('pin:contacts-updated', onContactsUpdated);
 
     searchInput.addEventListener('input', () => renderList(searchInput.value));
     renderList('');
