@@ -21,11 +21,26 @@ interface VoicePayload {
   durationSec?: number;
 }
 
+type AttachmentKind = 'image' | 'audio' | 'video' | 'file';
+
+interface AttachmentPayload {
+  name: string;
+  mime: string;
+  sizeBytes: number;
+  kind: AttachmentKind;
+  dataB64: string;
+  caption?: string;
+}
+
 interface ParsedPinEnvelope {
   text: string;
   replyTo?: ReplyContext;
   voice?: VoicePayload;
+  attachment?: AttachmentPayload;
 }
+
+const MAX_ATTACHMENT_RAW_BYTES = 330_000;
+const MAX_IMAGE_TARGET_BYTES = 300_000;
 
 const PIN_PATTERN = /\b[A-Z0-9]{4}-?[A-Z0-9]{4}\b/g;
 const SINGLE_PIN_RE = /\b[A-Z0-9]{4}-?[A-Z0-9]{4}\b/;
@@ -107,7 +122,187 @@ function pickSupportedAudioMime(): string {
   return '';
 }
 
-function parsePinEnvelope(rawText: string): ParsedPinEnvelope | null {
+
+function classifyAttachmentKind(mime: string, name: string): AttachmentKind {
+  const m = mime.toLowerCase();
+  const n = name.toLowerCase();
+  if ((m.startsWith('image/') && m !== 'image/svg+xml') || /.(png|jpe?g|webp|gif)$/i.test(n)) {
+    return 'image';
+  }
+  if (m.startsWith('video/') || /.(mp4|webm|mov|m4v)$/i.test(n)) {
+    return 'video';
+  }
+  if (m.startsWith('audio/') || /.(mp3|ogg|wav|m4a|aac|opus)$/i.test(n)) {
+    return 'audio';
+  }
+  return 'file';
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+}
+
+function getSafeDownloadMime(mime: string): string {
+  const m = mime.toLowerCase().trim();
+  if (
+    !m ||
+    m.includes('html') ||
+    m.includes('svg') ||
+    m.includes('javascript') ||
+    m.includes('ecmascript') ||
+    m.includes('xml')
+  ) {
+    return 'application/octet-stream';
+  }
+  return m;
+}
+
+function getAttachmentIcon(kind: AttachmentKind, name: string): string {
+  if (kind === 'image') return '🖼️';
+  if (kind === 'video') return '🎬';
+  if (kind === 'audio') return '🎵';
+  const lower = name.toLowerCase();
+  if (lower.endsWith('.pdf')) return '📕';
+  if (/.(xlsx?|csv)$/i.test(lower)) return '📊';
+  if (/.(zip|rar|7z|tar|gz)$/i.test(lower)) return '📦';
+  return '📄';
+}
+
+function parseAttachmentFromRaw(raw: string): AttachmentPayload | undefined {
+  const trimmed = raw.trim();
+  if (!trimmed.startsWith('{') || !trimmed.includes('"attachment"')) return undefined;
+  try {
+    const obj = JSON.parse(trimmed) as unknown;
+    if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return undefined;
+    const rawAtt = (obj as Record<string, unknown>)['attachment'];
+    if (!rawAtt || typeof rawAtt !== 'object' || Array.isArray(rawAtt)) return undefined;
+    const a = rawAtt as Record<string, unknown>;
+    const name = typeof a['name'] === 'string' ? a['name'].trim() : '';
+    const mime = typeof a['mime'] === 'string' ? a['mime'].trim() : '';
+    const dataB64 = typeof a['dataB64'] === 'string' ? a['dataB64'].trim() : '';
+    const sizeBytes =
+      typeof a['sizeBytes'] === 'number' && Number.isFinite(a['sizeBytes']) ? a['sizeBytes'] : 0;
+    const kindRaw = typeof a['kind'] === 'string' ? a['kind'] : '';
+    const kind: AttachmentKind =
+      kindRaw === 'image' || kindRaw === 'audio' || kindRaw === 'video' || kindRaw === 'file'
+        ? kindRaw
+        : classifyAttachmentKind(mime, name);
+    const caption = typeof a['caption'] === 'string' && a['caption'].trim() ? a['caption'].trim() : undefined;
+    if (!name || !mime || !dataB64) return undefined;
+    return {
+      name,
+      mime,
+      sizeBytes,
+      kind,
+      dataB64,
+      ...(caption ? { caption } : {}),
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+async function compressImageFileForInline(file: File): Promise<{ blob: Blob; mime: string; name: string; compressed: boolean }> {
+  if (file.type === 'image/gif' && file.size <= MAX_ATTACHMENT_RAW_BYTES) {
+    return { blob: file, mime: file.type, name: file.name, compressed: false };
+  }
+  if (file.type !== 'image/svg+xml' && file.size <= MAX_IMAGE_TARGET_BYTES) {
+    return { blob: file, mime: file.type || 'image/jpeg', name: file.name, compressed: false };
+  }
+
+  const objUrl = URL.createObjectURL(file);
+  try {
+    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const el = new Image();
+      el.onload = () => resolve(el);
+      el.onerror = () => reject(new Error('No se pudo leer la imagen seleccionada.'));
+      el.src = objUrl;
+    });
+
+    const origW = img.naturalWidth || img.width;
+    const origH = img.naturalHeight || img.height;
+    if (!origW || !origH) {
+      throw new Error('Dimensiones de imagen inválidas.');
+    }
+
+    const attempts = [
+      { maxDim: 1400, quality: 0.82 },
+      { maxDim: 1200, quality: 0.72 },
+      { maxDim: 960, quality: 0.62 },
+      { maxDim: 800, quality: 0.52 },
+      { maxDim: 640, quality: 0.42 },
+      { maxDim: 480, quality: 0.34 },
+    ];
+
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      throw new Error('Tu navegador no permite comprimir imágenes en canvas.');
+    }
+
+    let smallestBlob: Blob | null = null;
+    for (const step of attempts) {
+      const scale = Math.min(1, step.maxDim / Math.max(origW, origH));
+      canvas.width = Math.max(1, Math.round(origW * scale));
+      canvas.height = Math.max(1, Math.round(origH * scale));
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+      const candidate = await new Promise<Blob | null>((resolve) => {
+        canvas.toBlob((b) => resolve(b), 'image/jpeg', step.quality);
+      });
+      if (!candidate) continue;
+      if (!smallestBlob || candidate.size < smallestBlob.size) {
+        smallestBlob = candidate;
+      }
+      if (candidate.size <= MAX_IMAGE_TARGET_BYTES) {
+        const baseName = file.name.replace(/.[^.]+$/, '') || 'imagen';
+        return {
+          blob: candidate,
+          mime: 'image/jpeg',
+          name: `${baseName}.jpg`,
+          compressed: true,
+        };
+      }
+    }
+
+    if (smallestBlob && smallestBlob.size <= MAX_ATTACHMENT_RAW_BYTES) {
+      const baseName = file.name.replace(/.[^.]+$/, '') || 'imagen';
+      return {
+        blob: smallestBlob,
+        mime: 'image/jpeg',
+        name: `${baseName}.jpg`,
+        compressed: true,
+      };
+    }
+
+    throw new Error('La imagen sigue superando 330 KB tras comprimirla. Prueba con una foto más pequeña.');
+  } finally {
+    URL.revokeObjectURL(objUrl);
+  }
+}
+
+function parsePinEnvelope(raw: string): ParsedPinEnvelope | null {
+  const base = parsePinEnvelopeBase(raw);
+  const attachment = parseAttachmentFromRaw(raw);
+  if (!base) {
+    if (!attachment) return null;
+    const icon = getAttachmentIcon(attachment.kind, attachment.name);
+    const label = attachment.caption
+      ? `${icon} ${attachment.name} — ${attachment.caption}`
+      : `${icon} ${attachment.name}`;
+    return { text: label, attachment };
+  }
+  if (attachment) {
+    return { ...base, attachment };
+  }
+  return base;
+}
+
+function parsePinEnvelopeBase(rawText: string): ParsedPinEnvelope | null {
   const trimmed = rawText.trim();
   if (!trimmed) return null;
 
@@ -230,6 +425,9 @@ class SoundAndNotificationController {
   private recordingTimerId: number | null = null;
   private recordingCancelled = false;
   private voiceBlobUrlCache = new Map<string, string>();
+  private attachBlobUrlCache = new Map<string, string>();
+  private pendingAttachment: { payload: AttachmentPayload; previewUrl: string | null; compressed: boolean } | null = null;
+  private attachSubmitBound = false;
 
   constructor() {
     if (typeof window !== 'undefined') {
@@ -543,6 +741,299 @@ class SoundAndNotificationController {
         form.appendChild(micBtn);
       }
     }
+
+    this.installAttachmentControls(form);
+  }
+
+  private installAttachmentControls(form: HTMLElement): void {
+    if (!document.getElementById('pin-attach-bar')) {
+      const bar = document.createElement('div');
+      bar.id = 'pin-attach-bar';
+      bar.className = 'pin-attach-bar';
+      bar.hidden = true;
+
+      const info = document.createElement('div');
+      info.className = 'pin-attach-bar-info';
+
+      const thumb = document.createElement('img');
+      thumb.id = 'pin-attach-thumb';
+      thumb.className = 'pin-attach-bar-thumb';
+      thumb.alt = 'Vista previa';
+      thumb.hidden = true;
+
+      const textWrap = document.createElement('div');
+      textWrap.className = 'pin-attach-bar-text';
+
+      const nameEl = document.createElement('div');
+      nameEl.id = 'pin-attach-name';
+      nameEl.className = 'pin-attach-bar-name';
+
+      const metaEl = document.createElement('div');
+      metaEl.id = 'pin-attach-meta';
+      metaEl.className = 'pin-attach-bar-meta';
+
+      textWrap.append(nameEl, metaEl);
+      info.append(thumb, textWrap);
+
+      const actions = document.createElement('div');
+      actions.className = 'pin-attach-bar-actions';
+
+      const sendBtn = document.createElement('button');
+      sendBtn.type = 'button';
+      sendBtn.className = 'pin-attach-send-btn';
+      sendBtn.textContent = 'Enviar';
+      sendBtn.addEventListener('click', () => this.sendPendingAttachment());
+
+      const clearBtn = document.createElement('button');
+      clearBtn.type = 'button';
+      clearBtn.className = 'pin-attach-cancel-btn';
+      clearBtn.textContent = '✕';
+      clearBtn.title = 'Quitar adjunto';
+      clearBtn.addEventListener('click', () => this.clearPendingAttachment());
+
+      actions.append(sendBtn, clearBtn);
+      bar.append(info, actions);
+      form.insertAdjacentElement('beforebegin', bar);
+    }
+
+    let fileInput = document.getElementById('pin-inline-file-input') as HTMLInputElement | null;
+    if (!fileInput) {
+      fileInput = document.createElement('input');
+      fileInput.id = 'pin-inline-file-input';
+      fileInput.type = 'file';
+      fileInput.hidden = true;
+      fileInput.style.display = 'none';
+      fileInput.addEventListener('change', () => {
+        const picked = fileInput?.files?.[0] ?? null;
+        if (fileInput) fileInput.value = '';
+        if (picked) {
+          void this.prepareAttachmentFile(picked);
+        }
+      });
+      form.appendChild(fileInput);
+    }
+
+    if (!document.getElementById('btn-attach-file')) {
+      const attachBtn = document.createElement('button');
+      attachBtn.id = 'btn-attach-file';
+      attachBtn.type = 'button';
+      attachBtn.textContent = '📎';
+      attachBtn.title = 'Adjuntar imagen, documento, audio o video corto (cifrado E2EE)';
+      attachBtn.setAttribute('aria-label', 'Adjuntar archivo cifrado');
+      attachBtn.addEventListener('click', () => {
+        const inp = document.getElementById('pin-inline-file-input') as HTMLInputElement | null;
+        inp?.click();
+      });
+
+      const micBtn = document.getElementById('btn-voice-record');
+      const submitBtn = form.querySelector<HTMLElement>('button[type="submit"]');
+      if (micBtn) {
+        form.insertBefore(attachBtn, micBtn);
+      } else if (submitBtn) {
+        form.insertBefore(attachBtn, submitBtn);
+      } else {
+        form.appendChild(attachBtn);
+      }
+    }
+
+    if (!this.attachSubmitBound) {
+      this.attachSubmitBound = true;
+      form.addEventListener(
+        'submit',
+        (ev) => {
+          if (!this.pendingAttachment) return;
+          ev.preventDefault();
+          ev.stopImmediatePropagation();
+          this.sendPendingAttachment();
+        },
+        true,
+      );
+    }
+  }
+
+  private async prepareAttachmentFile(file: File): Promise<void> {
+    const statusEl = document.getElementById('global-status');
+    try {
+      const kind = classifyAttachmentKind(file.type || '', file.name || 'archivo');
+      let finalBlob: Blob = file;
+      let finalMime = file.type || 'application/octet-stream';
+      let finalName = (file.name || 'archivo').trim();
+      let compressed = false;
+
+      if (kind === 'image') {
+        if (statusEl) statusEl.textContent = 'Optimizando imagen para envío cifrado…';
+        const res = await compressImageFileForInline(file);
+        finalBlob = res.blob;
+        finalMime = res.mime;
+        finalName = res.name;
+        compressed = res.compressed;
+      } else if (file.size > MAX_ATTACHMENT_RAW_BYTES) {
+        if (statusEl) {
+          statusEl.textContent = `El archivo pesa ${formatFileSize(file.size)}. El límite actual sin almacenamiento externo es 330 KB (las imágenes se comprimen automáticamente).`;
+        }
+        return;
+      }
+
+      if (finalBlob.size === 0) {
+        if (statusEl) statusEl.textContent = 'El archivo seleccionado está vacío.';
+        return;
+      }
+
+      const dataB64 = await blobToBase64(finalBlob);
+      this.clearPendingAttachment();
+
+      const previewUrl = kind === 'image' ? URL.createObjectURL(finalBlob) : null;
+      this.pendingAttachment = {
+        payload: {
+          name: finalName,
+          mime: finalMime,
+          sizeBytes: finalBlob.size,
+          kind,
+          dataB64,
+        },
+        previewUrl,
+        compressed,
+      };
+
+      this.renderPendingAttachmentBar();
+      if (statusEl) {
+        statusEl.textContent = `Archivo listo: ${finalName} (${formatFileSize(finalBlob.size)}). Pulsa Enviar.`;
+      }
+    } catch (err) {
+      if (statusEl) {
+        statusEl.textContent = `Error preparando adjunto: ${(err as Error).message}`;
+      }
+    }
+  }
+
+  private renderPendingAttachmentBar(): void {
+    const bar = document.getElementById('pin-attach-bar');
+    const thumb = document.getElementById('pin-attach-thumb') as HTMLImageElement | null;
+    const nameEl = document.getElementById('pin-attach-name');
+    const metaEl = document.getElementById('pin-attach-meta');
+    if (!bar) return;
+
+    if (!this.pendingAttachment) {
+      bar.hidden = true;
+      if (thumb) {
+        thumb.hidden = true;
+        thumb.removeAttribute('src');
+      }
+      return;
+    }
+
+    const { payload, previewUrl, compressed } = this.pendingAttachment;
+    if (thumb) {
+      if (previewUrl) {
+        thumb.src = previewUrl;
+        thumb.hidden = false;
+      } else {
+        thumb.hidden = true;
+        thumb.removeAttribute('src');
+      }
+    }
+    if (nameEl) {
+      nameEl.textContent = `${getAttachmentIcon(payload.kind, payload.name)} ${payload.name}`;
+    }
+    if (metaEl) {
+      metaEl.textContent = `${formatFileSize(payload.sizeBytes)}${compressed ? ' · optimizada' : ''} · cifrado E2EE`;
+    }
+    bar.hidden = false;
+  }
+
+  private clearPendingAttachment(): void {
+    if (this.pendingAttachment?.previewUrl) {
+      URL.revokeObjectURL(this.pendingAttachment.previewUrl);
+    }
+    this.pendingAttachment = null;
+    this.renderPendingAttachmentBar();
+  }
+
+  private sendPendingAttachment(): void {
+    const staged = this.pendingAttachment;
+    if (!staged) return;
+
+    const inputEl = document.getElementById('input-msg') as HTMLInputElement | null;
+    const caption = (inputEl?.value ?? '').trim();
+    if (inputEl) inputEl.value = '';
+
+    const replyTo = this.activeReply;
+    if (replyTo) this.clearActiveReply();
+
+    const attPayload: AttachmentPayload = {
+      ...staged.payload,
+      ...(caption ? { caption } : {}),
+    };
+    const icon = getAttachmentIcon(attPayload.kind, attPayload.name);
+    const summary = caption
+      ? `${icon} ${attPayload.name} — ${caption}`
+      : `${icon} ${attPayload.name}`;
+
+    const envelope = {
+      __pin_v: 2,
+      kind: 'text',
+      text: summary,
+      ...(replyTo ? { replyTo } : {}),
+      attachment: attPayload,
+    };
+
+    this.clearPendingAttachment();
+    window.dispatchEvent(
+      new CustomEvent('pin:send-raw-payload', {
+        detail: { payload: JSON.stringify(envelope) },
+      }),
+    );
+  }
+
+  private getOrCreateAttachmentUrl(att: AttachmentPayload): string | null {
+    const safeMime = att.kind === 'file' ? getSafeDownloadMime(att.mime) : att.mime;
+    const cacheKey = `${safeMime}|${att.dataB64.length}|${att.dataB64.slice(0, 40)}`;
+    const existing = this.attachBlobUrlCache.get(cacheKey);
+    if (existing) return existing;
+    const url = base64ToBlobUrl(att.dataB64, safeMime);
+    if (url) {
+      this.attachBlobUrlCache.set(cacheKey, url);
+    }
+    return url;
+  }
+
+  private openImageLightbox(srcUrl: string, fileName: string): void {
+    const prev = document.getElementById('pin-img-lightbox');
+    if (prev) prev.remove();
+
+    const overlay = document.createElement('div');
+    overlay.id = 'pin-img-lightbox';
+    overlay.className = 'pin-img-lightbox';
+    overlay.addEventListener('click', (ev) => {
+      if (ev.target === overlay) overlay.remove();
+    });
+
+    const panel = document.createElement('div');
+    panel.className = 'pin-img-lightbox-panel';
+
+    const img = document.createElement('img');
+    img.src = srcUrl;
+    img.alt = fileName;
+
+    const footer = document.createElement('div');
+    footer.className = 'pin-img-lightbox-footer';
+
+    const dl = document.createElement('a');
+    dl.href = srcUrl;
+    dl.download = fileName;
+    dl.className = 'pin-attach-download-btn';
+    dl.textContent = '⬇ Descargar';
+
+    const closeBtn = document.createElement('button');
+    closeBtn.type = 'button';
+    closeBtn.className = 'pin-attach-cancel-btn';
+    closeBtn.textContent = 'Cerrar';
+    closeBtn.addEventListener('click', () => overlay.remove());
+
+    footer.append(dl, closeBtn);
+    panel.append(img, footer);
+    overlay.appendChild(panel);
+    document.body.appendChild(overlay);
   }
 
   private setVoiceUiRecording(isRecording: boolean): void {
@@ -1362,7 +1853,7 @@ class SoundAndNotificationController {
     }
 
     const parsed = parsePinEnvelope(bodySource);
-    if (parsed && (parsed.replyTo || parsed.voice)) {
+    if (parsed && (parsed.replyTo || parsed.voice || parsed.attachment)) {
       for (const child of Array.from(bubble.childNodes)) {
         if (child !== metaEl) {
           child.remove();
@@ -1408,6 +1899,73 @@ class SoundAndNotificationController {
         }
 
         frag.appendChild(playerWrap);
+      } else if (parsed.attachment) {
+        const att = parsed.attachment;
+        const blobUrl = this.getOrCreateAttachmentUrl(att);
+        const card = document.createElement('div');
+        card.className = 'pin-attach-card';
+
+        if (att.kind === 'image' && blobUrl) {
+          const img = document.createElement('img');
+          img.className = 'pin-attach-img';
+          img.src = blobUrl;
+          img.alt = att.name;
+          img.loading = 'lazy';
+          img.addEventListener('click', () => this.openImageLightbox(blobUrl, att.name));
+          card.appendChild(img);
+        } else if (att.kind === 'video' && blobUrl) {
+          const video = document.createElement('video');
+          video.className = 'pin-attach-video';
+          video.controls = true;
+          video.preload = 'metadata';
+          video.setAttribute('playsinline', 'true');
+          video.src = blobUrl;
+          card.appendChild(video);
+        } else if (att.kind === 'audio' && blobUrl) {
+          const audio = document.createElement('audio');
+          audio.controls = true;
+          audio.preload = 'metadata';
+          audio.src = blobUrl;
+          card.appendChild(audio);
+        }
+
+        const fileRow = document.createElement('div');
+        fileRow.className = 'pin-attach-file-row';
+
+        const metaWrap = document.createElement('div');
+        metaWrap.className = 'pin-attach-file-meta';
+
+        const nameDiv = document.createElement('div');
+        nameDiv.className = 'pin-attach-file-name';
+        nameDiv.textContent = `${getAttachmentIcon(att.kind, att.name)} ${att.name}`;
+
+        const sizeDiv = document.createElement('div');
+        sizeDiv.className = 'pin-attach-file-size';
+        sizeDiv.textContent = att.sizeBytes > 0 ? formatFileSize(att.sizeBytes) : att.mime;
+
+        metaWrap.append(nameDiv, sizeDiv);
+        fileRow.appendChild(metaWrap);
+
+        if (blobUrl) {
+          const dl = document.createElement('a');
+          dl.className = 'pin-attach-download-btn';
+          dl.href = blobUrl;
+          dl.download = att.name;
+          dl.textContent = '⬇';
+          dl.title = `Descargar ${att.name}`;
+          fileRow.appendChild(dl);
+        }
+
+        card.appendChild(fileRow);
+
+        if (att.caption) {
+          const cap = document.createElement('div');
+          cap.className = 'pin-clean-msg-text pin-attach-caption';
+          cap.textContent = this.replacePinsWithAliasesInText(att.caption);
+          card.appendChild(cap);
+        }
+
+        frag.appendChild(card);
       } else {
         const cleanSpan = document.createElement('div');
         cleanSpan.className = 'pin-clean-msg-text';
@@ -1638,7 +2196,7 @@ class SoundAndNotificationController {
       if (
         btn.id === 'pin-btn-edit-alias' ||
         btn.id === 'btn-search-saved-contacts' ||
-        btn.id === 'btn-voice-record' || Boolean(btn.closest('#pin-voice-bar')) || btn.id === 'btn-start-voice-call' || Boolean(btn.closest('#pin-call-overlay'))
+        btn.id === 'btn-voice-record' || btn.id === 'btn-attach-file' || Boolean(btn.closest('#pin-attach-bar')) || Boolean(btn.closest('#pin-img-lightbox')) || Boolean(btn.closest('#pin-voice-bar')) || btn.id === 'btn-start-voice-call' || Boolean(btn.closest('#pin-call-overlay'))
       ) {
         return;
       }

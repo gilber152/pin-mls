@@ -2194,15 +2194,15 @@ window.addEventListener('pin:send-raw-payload', (ev: Event) => {
     return;
   }
   if (payload.length > 480_000) {
-    setGlobalStatus('La nota de voz es demasiado larga para el límite de 512 KB. Graba un audio más corto.');
+    setGlobalStatus('El archivo o nota de voz supera el límite de 512 KB cifrados.');
     return;
   }
   void (async () => {
     try {
-      setGlobalStatus('Enviando nota de voz cifrada…');
+      setGlobalStatus('Enviando archivo/audio cifrado…');
       await sendMessage(payload);
     } catch (err) {
-      setGlobalStatus(`Error enviando nota de voz: ${(err as Error).message}`);
+      setGlobalStatus(`Error enviando archivo/audio: ${(err as Error).message}`);
     }
   })();
 });

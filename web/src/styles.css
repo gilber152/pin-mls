@@ -2741,3 +2741,218 @@ button[aria-label*="audio" i] {
   border-color: #f59e0b !important;
 }
 /* === PIN_VOICE_CALL_STYLE_END === */
+/* === PIN_INLINE_ATTACHMENTS_STYLE_START === */
+#btn-attach-file {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  min-width: 42px;
+  min-height: 42px;
+  padding: 0;
+  border-radius: 999px !important;
+  background: #1e3a8a !important;
+  border: 1px solid #3b82f6 !important;
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff !important;
+  font-size: 1.05rem;
+  cursor: pointer;
+  flex-shrink: 0 !important;
+}
+
+.pin-attach-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 12px;
+  background: #0f2240;
+  border-top: 1px solid #1e3a8a;
+  width: 100%;
+  box-sizing: border-box;
+  flex-shrink: 0;
+}
+
+.pin-attach-bar[hidden] {
+  display: none !important;
+}
+
+.pin-attach-bar-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.pin-attach-bar-thumb {
+  width: 40px;
+  height: 40px;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  flex-shrink: 0;
+}
+
+.pin-attach-bar-text {
+  min-width: 0;
+}
+
+.pin-attach-bar-name {
+  font-size: 0.86rem;
+  font-weight: 700;
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff !important;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pin-attach-bar-meta {
+  font-size: 0.75rem;
+  color: #93c5fd !important;
+  -webkit-text-fill-color: #93c5fd !important;
+}
+
+.pin-attach-bar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.pin-attach-send-btn {
+  padding: 7px 14px !important;
+  border-radius: 10px !important;
+  background: #16a34a !important;
+  border: 1px solid #22c55e !important;
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff !important;
+  font-weight: 700 !important;
+  font-size: 0.84rem !important;
+  cursor: pointer !important;
+}
+
+.pin-attach-cancel-btn {
+  padding: 7px 11px !important;
+  border-radius: 10px !important;
+  background: #334155 !important;
+  border: 1px solid #64748b !important;
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff !important;
+  font-weight: 700 !important;
+  font-size: 0.84rem !important;
+  cursor: pointer !important;
+}
+
+.pin-attach-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 100%;
+}
+
+.pin-attach-img {
+  display: block;
+  max-width: min(280px, 100%);
+  max-height: 300px;
+  border-radius: 10px;
+  object-fit: cover;
+  cursor: zoom-in;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+}
+
+.pin-attach-video {
+  display: block;
+  max-width: min(290px, 100%);
+  max-height: 260px;
+  border-radius: 10px;
+  background: #000000;
+}
+
+.pin-attach-card audio {
+  max-width: 100%;
+}
+
+.pin-attach-file-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: rgba(15, 23, 42, 0.28);
+  border: 1px solid rgba(148, 163, 184, 0.25);
+}
+
+.pin-attach-file-meta {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.pin-attach-file-name {
+  font-size: 0.85rem;
+  font-weight: 700;
+  word-break: break-word;
+}
+
+.pin-attach-file-size {
+  font-size: 0.74rem;
+  opacity: 0.85;
+}
+
+.pin-attach-download-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 34px;
+  height: 34px;
+  padding: 0 10px;
+  border-radius: 8px;
+  background: #1d4ed8 !important;
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff !important;
+  text-decoration: none !important;
+  font-weight: 700;
+  font-size: 0.86rem;
+  flex-shrink: 0;
+}
+
+.pin-attach-caption {
+  margin-top: 2px;
+}
+
+.pin-img-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  background: rgba(5, 13, 28, 0.9);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+.pin-img-lightbox-panel {
+  max-width: min(94vw, 900px);
+  max-height: 92vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+.pin-img-lightbox-panel img {
+  max-width: 100%;
+  max-height: 80vh;
+  border-radius: 12px;
+  object-fit: contain;
+}
+
+.pin-img-lightbox-footer {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+/* === PIN_INLINE_ATTACHMENTS_STYLE_END === */
