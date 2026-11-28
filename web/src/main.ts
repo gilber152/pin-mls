@@ -1,3 +1,4 @@
+import { installPwaInstallButton } from './ui/pwaInstall.js';
 import { installAndroidNativeBridge } from './native/androidBridge.js';
 import { setMediaAuthProvider } from './net/e2eeMedia.js';
 import { VoiceCallController, isVoiceCallSignalText } from './call/voiceCall.js';
@@ -2447,3 +2448,5 @@ window.addEventListener('pin:delete-message', (ev: Event) => {
 /* === PIN_DELETE_MESSAGE_END === */
 
 installAndroidNativeBridge();
+
+installPwaInstallButton();

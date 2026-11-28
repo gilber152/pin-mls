@@ -11,6 +11,7 @@
     <link rel="apple-touch-icon" href="/icon-192.png" />
     <link rel="stylesheet" href="/src/styles.css" />
       <script id="pin-boot-session-guard">try{if(localStorage.getItem('pin_mls_has_active_session_v1')==='1'&&localStorage.getItem('pin_mls_manual_logout_v1')!=='1'){document.documentElement.classList.add('pin-boot-hide-onboarding');setTimeout(function(){document.documentElement.classList.remove('pin-boot-hide-onboarding');},2500);}}catch(_){}</script>
+        <script id="pin-pwa-early-capture">window.__pinDeferredInstallPrompt=null;window.addEventListener('beforeinstallprompt',function(e){e.preventDefault();window.__pinDeferredInstallPrompt=e;window.dispatchEvent(new Event('pin:install-available'));});</script>
   </head>
   <body>
     <div id="app">
@@ -49,6 +50,7 @@
             <span id="ws-badge" class="ws-badge offline">Desconectado</span>
           </div>
           <div class="topbar-actions">
+            <button id="btn-install-pwa" type="button" class="btn-primary">Instalar app</button>
             <button id="btn-sync-now" class="btn-ghost">Sincronizar</button>
             <button id="btn-open-devices" class="btn-secondary">Dispositivos</button>
             <button id="btn-open-safe" class="btn-secondary">Safe Backup</button>

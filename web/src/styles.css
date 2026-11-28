@@ -3187,3 +3187,42 @@ button[aria-label*="audio" i] {
   text-align: center !important;
 }
 /* === PIN_TOAST_AND_MSGMENU_STYLE_END === */
+/* === PIN_PWA_INSTALL_STYLE_START === */
+#btn-install-pwa[hidden] {
+  display: none !important;
+}
+
+#btn-install-pwa {
+  background: #0ea5e9 !important;
+  border: 1px solid #38bdf8 !important;
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff !important;
+  font-weight: 700 !important;
+}
+
+.pin-install-help-body {
+  color: #e2e8f0 !important;
+  -webkit-text-fill-color: #e2e8f0 !important;
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+
+.pin-install-help-body p {
+  margin: 0 0 8px 0;
+}
+
+.pin-install-help-body ol {
+  margin: 0 0 10px 0;
+  padding-left: 18px;
+}
+
+.pin-install-help-body li {
+  margin-bottom: 6px;
+}
+
+.pin-install-help-note {
+  font-size: 0.8rem;
+  color: #93c5fd !important;
+  -webkit-text-fill-color: #93c5fd !important;
+}
+/* === PIN_PWA_INSTALL_STYLE_END === */

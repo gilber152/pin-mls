@@ -2533,6 +2533,8 @@ class SoundAndNotificationController {
       if (
         btn.id === 'pin-btn-edit-alias' ||
         btn.id === 'btn-search-saved-contacts' ||
+        btn.id === 'btn-install-pwa' ||
+        Boolean(btn.closest('#pin-install-help-modal')) ||
         btn.id === 'btn-voice-record' || btn.id === 'btn-attach-file' || Boolean(btn.closest('#pin-attach-bar')) || Boolean(btn.closest('.pin-attach-card')) || Boolean(btn.closest('#pin-img-lightbox')) || Boolean(btn.closest('#pin-msg-action-sheet')) || Boolean(btn.closest('#pin-alias-modal')) || Boolean(btn.closest('#pin-voice-bar')) || btn.id === 'btn-start-voice-call' || Boolean(btn.closest('#pin-call-overlay'))
       ) {
         return;
