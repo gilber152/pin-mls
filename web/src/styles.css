@@ -3002,3 +3002,47 @@ button[aria-label*="audio" i] {
   flex-shrink: 0 !important;
 }
 /* === PIN_SUPABASE_MEDIA_EXTRA_END === */
+/* === PIN_ATTACH_VISIBILITY_FIX_START === */
+#form-send-msg {
+  display: flex !important;
+  align-items: center !important;
+  flex-wrap: nowrap !important;
+  gap: 8px !important;
+}
+
+#form-send-msg #input-msg {
+  flex: 1 1 0% !important;
+  min-width: 0 !important;
+}
+
+#form-send-msg #btn-attach-file,
+#btn-attach-file {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  width: 42px !important;
+  min-width: 42px !important;
+  height: 42px !important;
+  min-height: 42px !important;
+  padding: 0 !important;
+  border-radius: 999px !important;
+  background: #1e3a8a !important;
+  border: 1px solid #3b82f6 !important;
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff !important;
+  font-size: 1.05rem !important;
+  cursor: pointer !important;
+  flex-shrink: 0 !important;
+}
+
+#form-send-msg #btn-voice-record {
+  width: 42px !important;
+  min-width: 42px !important;
+  height: 42px !important;
+  min-height: 42px !important;
+  padding: 0 !important;
+  flex-shrink: 0 !important;
+}
+/* === PIN_ATTACH_VISIBILITY_FIX_END === */

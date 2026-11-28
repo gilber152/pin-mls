@@ -797,6 +797,25 @@ class SoundAndNotificationController {
       }
     }
 
+    const mountedAttachBtn = document.getElementById('btn-attach-file') as HTMLButtonElement | null;
+    if (mountedAttachBtn) {
+      mountedAttachBtn.hidden = false;
+      mountedAttachBtn.disabled = this.isUploadingAttachment;
+      mountedAttachBtn.style.removeProperty('display');
+      mountedAttachBtn.style.removeProperty('visibility');
+      if (mountedAttachBtn.parentElement !== form) {
+        const micBtn = document.getElementById('btn-voice-record');
+        const submitBtn = form.querySelector<HTMLElement>('button[type="submit"]');
+        if (micBtn && micBtn.parentElement === form) {
+          form.insertBefore(mountedAttachBtn, micBtn);
+        } else if (submitBtn && submitBtn.parentElement === form) {
+          form.insertBefore(mountedAttachBtn, submitBtn);
+        } else {
+          form.appendChild(mountedAttachBtn);
+        }
+      }
+    }
+
     if (!this.attachSubmitBound) {
       this.attachSubmitBound = true;
       form.addEventListener(
